@@ -6,11 +6,13 @@
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
+    #include <windows.h>
     #pragma comment(lib, "ws2_32.lib")
 #else
     #include <sys/socket.h>
     #include <netinet/in.h>
     #include <arpa/inet.h>
+    #include <sys/time.h>
     #include <unistd.h>
     #include <fcntl.h>
 #endif
@@ -23,9 +25,13 @@ static struct sockaddr_in bind_addr;
 static unsigned int client_last_seq[MAX_CLIENTS];
 
 static unsigned int get_server_time(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (unsigned int)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+#ifdef _WIN32
+    return (unsigned int)GetTickCount();
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (unsigned int)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
+#endif
 }
 
 static void server_net_init(void) {
