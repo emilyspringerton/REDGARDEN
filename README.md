@@ -3,6 +3,7 @@ Acceptance Criteria (Vertical Slice)
 Render a 20×20 isometric grid with visible cell boundaries.
 Run a cellular-automata tick every 2 seconds for grid state updates.
 Support grid states: Neutral, Player, Enemy, Corrupted.
+ITERATE
 Place static Frontier Villages during map generation.
 Provide a card hand UI with 5 slots at the bottom of the screen.
 Implement mouse drag-and-drop to place cards onto valid grid cells.

@@ -34,6 +34,7 @@ typedef struct {
     struct sockaddr_in clients[MAX_CLIENTS];
     uint32_t server_tick;
     uint32_t next_entity_id;
+    uint32_t automata_timer_ms;
 } ServerState;
 
 extern ServerState local_state;

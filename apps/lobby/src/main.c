@@ -47,6 +47,12 @@ static const float cell_w = 40.0f;
 static const float cell_h = 20.0f;
 static const float grid_origin_x = 640.0f;
 static const float grid_origin_y = 140.0f;
+static const int card_costs[HAND_SIZE] = {2, 3, 1, 5, 0};
+static const uint32_t card_cooldowns_ms[HAND_SIZE] = {1500, 2000, 1200, 4000, 0};
+static float card_cooldown_left[HAND_SIZE] = {0};
+static int player_influence = 10;
+static int max_influence = 20;
+static uint32_t influence_timer = 0;
 
 static void draw_char(char c, float x, float y, float s) {
     glLineWidth(2.0f);
@@ -117,6 +123,12 @@ static void draw_string(const char* str, float x, float y, float size) {
     }
 }
 
+static void draw_number(int value, float x, float y, float size) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d", value);
+    draw_string(buf, x, y, size);
+}
+
 static void grid_to_screen(int gx, int gz, float *sx, float *sy) {
     *sx = grid_origin_x + (gx - gz) * (cell_w / 2.0f);
     *sy = grid_origin_y + (gx + gz) * (cell_h / 2.0f);
@@ -146,7 +158,14 @@ static void draw_cell(int gx, int gz, float r, float g, float b) {
 static void draw_grid(void) {
     for (int x = 0; x < GRID_DIM; x++) {
         for (int z = 0; z < GRID_DIM; z++) {
-            draw_cell(x, z, 0.0f, 0.6f, 0.9f);
+            float r = 0.0f, g = 0.6f, b = 0.9f;
+            switch (local_state.grid[x][z].state) {
+                case CELL_PLAYER: r = 1.0f; g = 0.0f; b = 0.8f; break;
+                case CELL_ENEMY: r = 0.0f; g = 1.0f; b = 0.4f; break;
+                case CELL_CORRUPTED: r = 1.0f; g = 0.0f; b = 0.0f; break;
+                default: break;
+            }
+            draw_cell(x, z, r, g, b);
         }
     }
 }
@@ -173,7 +192,8 @@ static void draw_cards(void) {
     float h = 80.0f;
     for (int i = 0; i < HAND_SIZE; i++) {
         float x = start_x + i * (w + 12.0f);
-        glColor3f(0.05f, 0.05f, 0.05f);
+        float shade = (card_cooldown_left[i] > 0.0f) ? 0.02f : 0.05f;
+        glColor3f(shade, shade, shade);
         glBegin(GL_QUADS);
         glVertex2f(x, y);
         glVertex2f(x + w, y);
@@ -194,6 +214,12 @@ static void draw_cards(void) {
         if (i == 1) draw_string("SCOUT", x + 10, y + 30, 8);
         if (i == 2) draw_string("SWARM", x + 10, y + 30, 8);
         if (i == 3) draw_string("OUTPOST", x + 10, y + 30, 8);
+        glColor3f(1.0f, 1.0f, 0.0f);
+        draw_number(card_costs[i], x + 6, y + 6, 8);
+        if (card_cooldown_left[i] > 0.0f) {
+            glColor3f(1.0f, 0.0f, 0.0f);
+            draw_string("CD", x + 70, y + 6, 8);
+        }
     }
 }
 
@@ -227,6 +253,15 @@ static void draw_ghost(void) {
     glVertex2f(sx - 12, sy + 12);
     glEnd();
     glDisable(GL_BLEND);
+}
+
+static void draw_influence(void) {
+    glColor3f(0.0f, 1.0f, 1.0f);
+    draw_string("INF", 20, 680, 10);
+    glColor3f(1.0f, 1.0f, 0.0f);
+    draw_number(player_influence, 70, 680, 10);
+    draw_string("/", 95, 680, 10);
+    draw_number(max_influence, 110, 680, 10);
 }
 
 static void net_init(void) {
@@ -333,7 +368,22 @@ int main(int argc, char *argv[]) {
     local_init_match(2);
 
     int running = 1;
+    uint32_t last_tick = SDL_GetTicks();
     while (running) {
+        uint32_t now = SDL_GetTicks();
+        uint32_t dt = now - last_tick;
+        last_tick = now;
+        influence_timer += dt;
+        if (influence_timer >= 1000) {
+            influence_timer = 0;
+            if (player_influence < max_influence) player_influence++;
+        }
+        for (int i = 0; i < HAND_SIZE; i++) {
+            if (card_cooldown_left[i] > 0.0f) {
+                card_cooldown_left[i] -= (float)dt;
+                if (card_cooldown_left[i] < 0.0f) card_cooldown_left[i] = 0.0f;
+            }
+        }
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) running = 0;
@@ -360,10 +410,15 @@ int main(int argc, char *argv[]) {
                 }
                 if (e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_LEFT) {
                     if (mouse_state.dragging_card >= 0 && mouse_state.placing_valid) {
+                        int card_idx = mouse_state.dragging_card;
+                        if (card_costs[card_idx] <= player_influence && card_cooldown_left[card_idx] <= 0.0f) {
                         if (app_state == STATE_GAME_LOCAL) {
-                            local_apply_card(1, mouse_state.dragging_card, mouse_state.hover_grid_x, mouse_state.hover_grid_z);
+                            local_apply_card(1, card_idx, mouse_state.hover_grid_x, mouse_state.hover_grid_z);
                         } else if (app_state == STATE_GAME_NET) {
-                            net_send_card((uint8_t)mouse_state.dragging_card, mouse_state.hover_grid_x, mouse_state.hover_grid_z);
+                            net_send_card((uint8_t)card_idx, mouse_state.hover_grid_x, mouse_state.hover_grid_z);
+                        }
+                        player_influence -= card_costs[card_idx];
+                        card_cooldown_left[card_idx] = (float)card_cooldowns_ms[card_idx];
                         }
                     }
                     mouse_state.dragging_card = -1;
@@ -392,6 +447,7 @@ int main(int argc, char *argv[]) {
             }
             draw_ghost();
             draw_cards();
+            draw_influence();
         }
         SDL_GL_SwapWindow(win);
         SDL_Delay(16);
