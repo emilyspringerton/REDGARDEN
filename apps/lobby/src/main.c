@@ -407,6 +407,17 @@ int main(int argc, char *argv[]) {
                     mouse_state.hover_grid_x = gx;
                     mouse_state.hover_grid_z = gz;
                     mouse_state.placing_valid = (gx >= 0 && gx < GRID_DIM && gz >= 0 && gz < GRID_DIM);
+                    if (mouse_state.placing_valid) {
+                        if (local_state.grid[gx][gz].state == CELL_CORRUPTED) {
+                            mouse_state.placing_valid = 0;
+                        }
+                    }
+                    if (mouse_state.dragging_card >= 0 && mouse_state.placing_valid) {
+                        int card_idx = mouse_state.dragging_card;
+                        if (card_costs[card_idx] > player_influence || card_cooldown_left[card_idx] > 0.0f) {
+                            mouse_state.placing_valid = 0;
+                        }
+                    }
                 }
                 if (e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_LEFT) {
                     if (mouse_state.dragging_card >= 0 && mouse_state.placing_valid) {

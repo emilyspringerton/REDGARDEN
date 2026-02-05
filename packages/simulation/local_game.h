@@ -35,6 +35,14 @@ typedef struct {
     uint32_t server_tick;
     uint32_t next_entity_id;
     uint32_t automata_timer_ms;
+    uint32_t match_time_ms;
+    uint32_t control_hold_ms[3];
+    uint8_t tech_tier[3];
+    int influence[3];
+    int max_influence[3];
+    uint32_t influence_timer_ms[3];
+    uint32_t card_cooldown_ms[3][CARD_COUNT];
+    int match_winner;
 } ServerState;
 
 extern ServerState local_state;
