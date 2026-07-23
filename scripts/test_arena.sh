@@ -16,4 +16,10 @@ gcc -std=c99 -O2 -Wall -Wextra -I"${ROOT_DIR}/packages" \
   "${ROOT_DIR}/packages/simulation/arena_game.c" \
   -lm
 
+gcc -std=c99 -O2 -Wall -Wextra -I"${ROOT_DIR}/packages" \
+  -o "${BUILD_DIR}/test_mat4" \
+  "${ROOT_DIR}/tests/test_mat4.c" \
+  -lm
+
 "${BUILD_DIR}/test_arena_game"
+"${BUILD_DIR}/test_mat4"
