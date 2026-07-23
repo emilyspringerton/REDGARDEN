@@ -124,6 +124,15 @@ fails cleanly at window creation rather than crashing). `~/sudo-queue/
 06-install-xvfb-for-arena-testing.sh` queued (needs sudo) so an actual render can be smoke-tested;
 usage instructions for `Xvfb` + `LIBGL_ALWAYS_SOFTWARE=1` are in the script's own comments.
 
+**Status check (2026-07-23, later same day):** confirmed via direct inspection — `apps/arena` is
+real, builds clean, and is genuinely the mouse-driven MOBA mode the roster work (`docs/
+HEROES_VS0.md`) is meant to iterate toward. **Gap found, not closed**: it currently drives generic
+colored-cube placeholder heroes, not the named roster — none of the 11 heroes' kits are wired into
+`arena_game.c` yet. Next concrete step for this mode: wire at least one real hero (kit + ability
+inputs replacing the placeholder cube's plain click-to-move/melee) into `arena_game.c`, proving the
+integration path before attempting the full roster. Not attempted this pass — flagged so the next
+session picks this up as the actual next step, not another content pass.
+
 Explicitly deferred past tonight (not attempted): the 10v10/5-node map, jungle ecology grafted onto
 `GoblinFoxDragon`'s mob/NM/loot systems (§8 below), terrain heightfield (`SHANKPIT/packages/world/
 terrain.c` is a fork candidate), team vision-sharing + minimap (needs a real teammate concept
