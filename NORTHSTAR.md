@@ -59,6 +59,40 @@ only — implicit `usleep` declaration, missing `<unistd.h>` include, trivial fi
 build on this box**: `GL/glu.h` missing, same root cause hit tonight on `shankpit-460`. Fix queued
 at `~/sudo-queue/05-install-glu-dev.sh` (not yet run — needs sudo).
 
+## 3.5. `apps/arena` — playable single-hero click-to-move demo (2026-07-23)
+
+Founder deadline: playable against a bot before this-time-tomorrow. New, separate, additive build
+target — does not touch `apps/lobby`/`apps/server`/`apps/client`/`packages/simulation/local_game.c`.
+A new sim (`packages/simulation/arena_game.c`) drives one player hero and one bot hero: click-to-
+move, melee combat, simple win condition. The bot's steering runs through a small hand-authored
+feed-forward net (dense → ReLU → dense → Tanh, same shape as `SHANKPIT/packages/simulation/
+neural_net.h`'s `bot_brain_forward`) rather than an if/else heuristic — weights are hand-picked, not
+trained (no training pipeline wired up), the honest "or equivalent" for tonight; two of the six
+hidden units carry distance/HP-difference signal with zero output weight, left as the hook a future
+trained pass would use for kiting/retreat behavior.
+
+The client (`apps/arena/src/main.c`) is **shader-based (modern GL) on purpose** — it only needs
+`GL/gl.h` + `SDL_GL_GetProcAddress` function loading, not GLU, so it sidesteps the exact dependency
+blocking `apps/lobby` above (confirmed: `ldd build/red_garden_arena` shows no `libGLU` at all).
+Colored-cube placeholders for heroes/nodes, lit by a basic one-directional fragment shader; right-
+drag-to-orbit + scroll-to-zoom camera; left-click-to-move with an animated expanding/fading ring
+marker at the target point; HP bars + win/lose banner reuse the existing lobby-style immediate-mode
+HUD text (GL context requested as compatibility profile specifically so that legacy `glBegin` text
+drawing still works alongside the new shader path, without needing a second text-rendering system).
+
+`scripts/build_arena.sh` compiles clean. **Not yet verified interactively** — this box is headless
+(no `DISPLAY`, no Xvfb installed; confirmed via `SDL_VIDEODRIVER=dummy` that the binary starts and
+fails cleanly at window creation rather than crashing). `~/sudo-queue/
+06-install-xvfb-for-arena-testing.sh` queued (needs sudo) so an actual render can be smoke-tested;
+usage instructions for `Xvfb` + `LIBGL_ALWAYS_SOFTWARE=1` are in the script's own comments.
+
+Explicitly deferred past tonight (not attempted): the 10v10/5-node map, jungle ecology grafted onto
+`GoblinFoxDragon`'s mob/NM/loot systems (§8 below), terrain heightfield (`SHANKPIT/packages/world/
+terrain.c` is a fork candidate), team vision-sharing + minimap (needs a real teammate concept
+first — this demo is 1 hero vs. 1 bot), real skeletal/keyframe animation, and any BRAWLPIT-derived
+assets (checked — that fork is also 100% old-style immediate-mode GL, nothing shader-based to
+reuse; its character/stage struct pattern is a loose future reference only).
+
 ## 4. Gap between wiki spec and live code
 
 The wiki's `SPEC-4.md`/`SPEC-5.md` describe a materially larger system than what's built:
