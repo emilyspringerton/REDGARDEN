@@ -158,3 +158,29 @@ combat power at all). Founder-flagged as "a good support archetype" specifically
 already refuses the flashy version — no shield-bash, no team-wide ultimate, just a hero whose whole
 identity is being the ally worth having in the lane for reasons that are never dramatic and never
 wrong. No mechanics designed yet, same discipline as the rest of this queue.
+
+## 8. Ecology + MOBA map concept (2026-07-23)
+
+Founder direction: tie the living cellular-automata board (§1's Neutral/Player/Enemy/Corrupted
+grid) into the hero pass (§6/§7) as one system, not two parallel ones.
+
+- **The board is alive, not just contested.** The automata grid already models territory as
+  something that spreads and reacts on its own tick, independent of direct player action (§1). The
+  addition here: some of what's out there should have persistent identity — living ecology whose
+  "DNA" remains in the world and interacts with real player-controlled heroes, rather than neutral
+  scenery that resets every tick. Concretely, this points at certain compendium entries (the
+  dungeon-boss / notorious-monster candidates already flagged for `GoblinFoxDragon/docs2/
+  HERO_CONTENT_FRAMEWORK.md`) existing as ecology-driven presences that persist, react, and evolve
+  across a match the same way the corruption-spread automata already does — distinct from the cards
+  a player actively deploys. §1's existing "not an autobattler" line still holds: players still
+  actively deploy their hand; the ecology is the board itself reacting back, not another player.
+- **Map shape: Arathi Basin, with more jungle.** A direct reference to WoW's classic capture-and-
+  hold battleground — several resource nodes spread across open ground, each worth a running
+  resource tick while held, no single chokepoint deciding the match. The addition on top of that
+  shape: more jungle — MOBA-style neutral camps/objectives woven into the open node-capture terrain,
+  giving the automata grid (§1) real geography to spread across between nodes, and giving the
+  ecology-driven heroes above actual territory to inhabit rather than being placed arbitrarily.
+
+Not scoped further yet — no map file, no automata-to-hero binding code, no node count decided.
+Captured here as real design direction before either the ecology grid or the hero queue (§7) get
+built out further, so the two don't end up designed against each other.
