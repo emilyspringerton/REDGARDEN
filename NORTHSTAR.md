@@ -94,3 +94,15 @@ any of it is built — flagged as a real requirement here, not scoped further in
 No multiplayer networking exists yet (current entities/state are single-process, local only). No
 mobile build targets exist. No LoL-style UI polish pass has started. This document is the
 accurate capture of tonight's real-time scoping, not a claim that any of it is built.
+
+## 6. Forward reference — hero/card lore (2026-07-23)
+
+`TYLER/multiverse_heroes.md` is a 110-entry lore compendium (names, history, faction, archetype —
+deliberately no abilities/stats/roles yet) built for "a League of Legends-like, Diablo II-like game
+... drawing from TYLER lore, tying in real mythologies ... wide multiverse." RED GARDEN is named,
+founder-confirmed, as the closest existing product this could feed: a card-hand RTS already aiming
+for LoL-style card affordances (§1, §2) with only four generic cards implemented (Militia/Scout/
+Swarmlings/Outpost, §3) — no named heroes yet. Nothing here commits RED GARDEN to that roster or to
+any specific card mechanics; per the compendium's own stated order, abilities and stats get designed
+*from* the lore in a later pass, once specific heroes are chosen to work on, not assumed now. Noted
+as a real, live cross-repo connection rather than left implicit.
