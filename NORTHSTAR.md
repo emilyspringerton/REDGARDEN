@@ -117,8 +117,19 @@ any entry below yet — that's still the deliberately-deferred later pass §6 al
 | Tier | Hero | Compendium # | Status |
 |---|---|---|---|
 | S | Zhang Guo Lao's Donkey | #38 (Faction 4 — Middle Kingdom Heirs) | Not started |
+| S | A Duck, Reportedly Telekinetic | #101 (Faction 10 — Springerton Engine) | Not started |
+| S | The Unicorn, Allegedly a Robot | #102 (Faction 10 — Springerton Engine) | Not started |
 
 **#38, for context:** "The famous Immortal's donkey, given its own story for once." Traditionally
 folds up like paper when not needed and unfolds when it is — the founder's S-tier pick turns that
 into its own character rather than a joke prop: a hero whose entire nature is showing up exactly
 when required and disappearing, without complaint, the rest of the time.
+
+**#101 and #102, for context:** the `just_a_duck.md` pair, drawn straight from Jack's Factory.
+The duck claims telekinesis, a government job, and that it's the chosen one; the unicorn counters
+with "I'm not really a unicorn, I'm a robot in disguise" while eating spaghetti. Neither claim is
+confirmed or denied anywhere in the source material or its continuation
+(`TYLER/episodes/x00_the_custody_of_a_duck.md`), and that's the point of both of them — the
+compendium's own note calls this pair "the one deliberately unresolved power level in the whole
+document." An S-tier pick for two characters whose entire identity is a dispute over which of
+them is less believable.
