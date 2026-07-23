@@ -174,16 +174,28 @@ grid) into the hero pass (§6/§7) as one system, not two parallel ones.
   across a match the same way the corruption-spread automata already does — distinct from the cards
   a player actively deploys. §1's existing "not an autobattler" line still holds: players still
   actively deploy their hand; the ecology is the board itself reacting back, not another player.
-- **Map shape: Arathi Basin, with more jungle.** A direct reference to WoW's classic capture-and-
-  hold battleground — several resource nodes spread across open ground, each worth a running
-  resource tick while held, no single chokepoint deciding the match. The addition on top of that
-  shape: more jungle — MOBA-style neutral camps/objectives woven into the open node-capture terrain,
-  giving the automata grid (§1) real geography to spread across between nodes, and giving the
-  ecology-driven heroes above actual territory to inhabit rather than being placed arbitrarily.
+- **Map shape: Arathi Basin, with more jungle — 10v10, 5 nodes.** A direct reference to WoW's
+  classic capture-and-hold battleground: 5 resource nodes (Arathi Basin's own count — Stables, Gold
+  Mine, Lumber Mill, Farm, Blacksmith, or this game's equivalent naming) spread across open ground,
+  each worth a running resource tick while held, no single chokepoint deciding the match. Team size
+  set at 10v10 — large enough that node control is a genuine map-wide coordination problem, not a
+  small-team skirmish. The addition on top of that shape: more jungle — MOBA-style neutral camps
+  woven into the terrain between the 5 nodes, giving the automata grid (§1) real geography to spread
+  across and giving the ecology-driven heroes above actual territory to inhabit rather than being
+  placed arbitrarily.
+- **The jungle is alive and dynamic, not static camps.** The neutral jungle above isn't a fixed set
+  of respawn-timer monster pens — it should behave like the rest of this board: reactive, spreading,
+  changing over the course of a match the same way the automata's Corrupted cells do (§1). Grafted
+  directly onto the mob/NM/loot systems already real and working in `GoblinFoxDragon`'s MUD (`server/
+  mob`, `server/nm`'s placeholder/window/respawn system, `server/loot`'s treasure pools) rather than
+  building a second, separate creature system from scratch — that substrate is live and already
+  play-tested (this session's own worm-grinding and Poison-bug fix ran on exactly this system). The
+  graft is the design decision; wiring it into RED GARDEN's own build is a later, separate pass.
 
-Not scoped further yet — no map file, no automata-to-hero binding code, no node count decided.
-Captured here as real design direction before either the ecology grid or the hero queue (§7) get
-built out further, so the two don't end up designed against each other.
+Not scoped further yet — no map file, no automata-to-hero binding code, no concrete node layout, no
+actual code connecting RED GARDEN to GFD's mob systems. Captured here as real design direction before
+either the ecology grid or the hero queue (§7) get built out further, so the two don't end up
+designed against each other.
 
 **Indirect-control archetypes are a deliberate roster feature, not a gap (2026-07-23).** Founder
 observation: a meaningful slice of the queued heroes already don't fit the standard MOBA taxonomy
