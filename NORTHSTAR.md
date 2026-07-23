@@ -97,7 +97,7 @@ accurate capture of tonight's real-time scoping, not a claim that any of it is b
 
 ## 6. Forward reference — hero/card lore (2026-07-23)
 
-`TYLER/multiverse_heroes.md` is a 110-entry lore compendium (names, history, faction, archetype —
+`TYLER/multiverse_heroes.md` is a 112-entry lore compendium (names, history, faction, archetype —
 deliberately no abilities/stats/roles yet) built for "a League of Legends-like, Diablo II-like game
 ... drawing from TYLER lore, tying in real mythologies ... wide multiverse." RED GARDEN is named,
 founder-confirmed, as the closest existing product this could feed: a card-hand RTS already aiming
@@ -116,21 +116,22 @@ any entry below yet — that's still the deliberately-deferred later pass §6 al
 
 | Tier | Hero | Compendium # | Status |
 |---|---|---|---|
-| S | Zhang Guo Lao's Donkey | #38 (Faction 4 — Middle Kingdom Heirs) | Not started |
-| S | A Duck, Reportedly Telekinetic | #101 (Faction 10 — Springerton Engine) | Not started |
-| S | The Unicorn, Allegedly a Robot | #102 (Faction 10 — Springerton Engine) | Not started |
-| S | The Ghost, Self-Identified as Alien | #103 (Faction 10 — Springerton Engine) | Not started |
-| S | The Frog, Keeper of a Secret It Won't Share | #104 (Faction 10 — Springerton Engine) | Not started |
-| S | The Tree, Speaking French | #105 (Faction 10 — Springerton Engine) | Not started |
-| S | The Pizza, On Fire, Uninvestigated | #106 (Faction 10 — Springerton Engine) | Not started |
-| S | The Retrieval Cart | #10 (Faction 1 — Jiangshi Syndicate) | Not started |
+| S | Zhang Guo Lao's Donkey ("The Donkey") | #38 (Faction 4 — Middle Kingdom Heirs) | Not started |
+| S | A Duck, Reportedly Telekinetic ("The Duck") | #103 (Faction 10 — Springerton Engine) | Not started |
+| S | The Unicorn, Allegedly a Robot ("The Unicorn") | #104 (Faction 10 — Springerton Engine) | Not started |
+| S | The Ghost, Self-Identified as Alien ("The Ghost") | #105 (Faction 10 — Springerton Engine) | Not started |
+| S | The Frog, Keeper of a Secret It Won't Share ("The Frog") | #106 (Faction 10 — Springerton Engine) | Not started |
+| S | The Tree, Speaking French ("The Tree") | #107 (Faction 10 — Springerton Engine) | Not started |
+| S | The Pizza, On Fire, Uninvestigated ("The Pizza") | #108 (Faction 10 — Springerton Engine) | Not started |
+| S | The Retrieval Cart ("The Cart") | #10 (Faction 1 — Jiangshi Syndicate) | Not started |
+| S | Buer, the Wheel-Physician ("Doc Wheel") | #25 (Faction 2 — Goetia Court) | Not started |
 
 **#38, for context:** "The famous Immortal's donkey, given its own story for once." Traditionally
 folds up like paper when not needed and unfolds when it is — the founder's S-tier pick turns that
 into its own character rather than a joke prop: a hero whose entire nature is showing up exactly
 when required and disappearing, without complaint, the rest of the time.
 
-**#101–#106, for context:** the complete `just_a_duck.md` ensemble is now in the queue, S-tier,
+**#103–#108, for context:** the complete `just_a_duck.md` ensemble is now in the queue, S-tier,
 end to end. Duck (telekinesis, government job, "the chosen one"), unicorn ("I'm a robot in
 disguise," said while eating spaghetti), ghost ("I'm not really a ghost, I'm an alien," said mid-
 piano), frog (top hat, claims to know the secret of time travel, has never told anyone — including
@@ -150,3 +151,10 @@ utility on its own schedule." That's a different shape than fighter/mage/support
 uncontrollable recurring world event attached to a lane than a traditional hero. No mechanics
 designed yet (same discipline as everything else in this queue) — flagged here specifically because
 that unusual shape is worth designing toward on purpose, not smoothing into a conventional kit.
+
+**#25, "Doc Wheel," for context — the queue's first deliberate support pick:** Goetia Court's Buer,
+played mundane in the lore (a healer whose only trick is being extremely good at medicine, no
+combat power at all). Founder-flagged as "a good support archetype" specifically because the lore
+already refuses the flashy version — no shield-bash, no team-wide ultimate, just a hero whose whole
+identity is being the ally worth having in the lane for reasons that are never dramatic and never
+wrong. No mechanics designed yet, same discipline as the rest of this queue.
