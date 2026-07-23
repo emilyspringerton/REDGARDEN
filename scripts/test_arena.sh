@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD_DIR="${ROOT_DIR}/build"
+
+mkdir -p "${BUILD_DIR}"
+
+# Headless on purpose -- no SDL/GL dependency, so this runs on any box,
+# including this one (no display, no Xvfb). Exercises the sim logic
+# underneath apps/arena, which is otherwise unverified here until Xvfb is
+# available (see ~/sudo-queue/06-install-xvfb-for-arena-testing.sh).
+gcc -std=c99 -O2 -Wall -Wextra -I"${ROOT_DIR}/packages" \
+  -o "${BUILD_DIR}/test_arena_game" \
+  "${ROOT_DIR}/tests/test_arena_game.c" \
+  "${ROOT_DIR}/packages/simulation/arena_game.c" \
+  -lm
+
+"${BUILD_DIR}/test_arena_game"
