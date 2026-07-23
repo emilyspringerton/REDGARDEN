@@ -119,17 +119,34 @@ any entry below yet — that's still the deliberately-deferred later pass §6 al
 | S | Zhang Guo Lao's Donkey | #38 (Faction 4 — Middle Kingdom Heirs) | Not started |
 | S | A Duck, Reportedly Telekinetic | #101 (Faction 10 — Springerton Engine) | Not started |
 | S | The Unicorn, Allegedly a Robot | #102 (Faction 10 — Springerton Engine) | Not started |
+| S | The Ghost, Self-Identified as Alien | #103 (Faction 10 — Springerton Engine) | Not started |
+| S | The Frog, Keeper of a Secret It Won't Share | #104 (Faction 10 — Springerton Engine) | Not started |
+| S | The Tree, Speaking French | #105 (Faction 10 — Springerton Engine) | Not started |
+| S | The Pizza, On Fire, Uninvestigated | #106 (Faction 10 — Springerton Engine) | Not started |
+| S | The Retrieval Cart | #10 (Faction 1 — Jiangshi Syndicate) | Not started |
 
 **#38, for context:** "The famous Immortal's donkey, given its own story for once." Traditionally
 folds up like paper when not needed and unfolds when it is — the founder's S-tier pick turns that
 into its own character rather than a joke prop: a hero whose entire nature is showing up exactly
 when required and disappearing, without complaint, the rest of the time.
 
-**#101 and #102, for context:** the `just_a_duck.md` pair, drawn straight from Jack's Factory.
-The duck claims telekinesis, a government job, and that it's the chosen one; the unicorn counters
-with "I'm not really a unicorn, I'm a robot in disguise" while eating spaghetti. Neither claim is
-confirmed or denied anywhere in the source material or its continuation
-(`TYLER/episodes/x00_the_custody_of_a_duck.md`), and that's the point of both of them — the
-compendium's own note calls this pair "the one deliberately unresolved power level in the whole
-document." An S-tier pick for two characters whose entire identity is a dispute over which of
-them is less believable.
+**#101–#106, for context:** the complete `just_a_duck.md` ensemble is now in the queue, S-tier,
+end to end. Duck (telekinesis, government job, "the chosen one"), unicorn ("I'm a robot in
+disguise," said while eating spaghetti), ghost ("I'm not really a ghost, I'm an alien," said mid-
+piano), frog (top hat, claims to know the secret of time travel, has never told anyone — including
+the duck, who covers for it as "shy"), tree (claims to be "the keeper of the universe's greatest
+secret" — in French, untranslated), and the pizza (announces "I am the chosen one," then catches
+fire, and nobody in either the source transcript or its continuation
+(`TYLER/episodes/x00_the_custody_of_a_duck.md`) ever checks on it). Not one claim across all six is
+confirmed or denied anywhere in the record. That's the whole cast, and it's the entire point of the
+pick: six characters whose only real competition is over whose story is the least believable, and
+the source material refuses, on principle, to ever settle it.
+
+**#10, for context — the most mechanically unusual pick so far:** the Jiangshi Syndicate's
+Retrieval Cart, a recurring anomaly where a requested document turns out to already be waiting,
+with no requester ever logged. Flagged as genuinely interesting for card-hand gameplay specifically
+because its core identity isn't "a unit that acts" — it's "something that delivers unrequested
+utility on its own schedule." That's a different shape than fighter/mage/support: closer to an
+uncontrollable recurring world event attached to a lane than a traditional hero. No mechanics
+designed yet (same discipline as everything else in this queue) — flagged here specifically because
+that unusual shape is worth designing toward on purpose, not smoothing into a conventional kit.
