@@ -3,6 +3,10 @@
 
 #include <math.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 /* Column-major 4x4, matching OpenGL's expected layout for glUniformMatrix4fv. */
 typedef struct { float m[16]; } Mat4;
 
