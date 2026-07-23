@@ -12,6 +12,8 @@
 #define PACKET_CARD_PLAY 1
 #define PACKET_SNAPSHOT 2
 #define PACKET_WELCOME 3
+#define PACKET_FIND_MATCH 4   /* client -> matchmaker: queue for a match */
+#define PACKET_MATCH_FOUND 5  /* matchmaker -> client: game-server port assigned */
 
 typedef enum {
     CELL_NEUTRAL = 0,
@@ -62,5 +64,12 @@ typedef struct {
     uint16_t hp;
     uint8_t state;
 } NetEntity;
+
+// Sent by the matchmaker after PACKET_MATCH_FOUND's NetHeader: the UDP port
+// of the freshly-spawned red_garden_server instance the client should now
+// connect to (see apps/matchmaker/src/main.c).
+typedef struct {
+    uint16_t port;
+} MatchFoundMsg;
 
 #endif

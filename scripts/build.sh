@@ -6,7 +6,7 @@ BUILD_DIR="${ROOT_DIR}/build"
 
 mkdir -p "${BUILD_DIR}"
 
-COMMON_FLAGS=(-std=c99 -O2 -Wall -Wextra -I"${ROOT_DIR}/packages")
+COMMON_FLAGS=(-std=c99 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -I"${ROOT_DIR}/packages")
 
 gcc "${COMMON_FLAGS[@]}" \
   -o "${BUILD_DIR}/red_garden_server" \
@@ -24,3 +24,7 @@ gcc "${COMMON_FLAGS[@]}" \
   "${ROOT_DIR}/apps/lobby/src/main.c" \
   "${ROOT_DIR}/packages/simulation/local_game.c" \
   -lSDL2 -lGL -lGLU -lm
+
+gcc "${COMMON_FLAGS[@]}" \
+  -o "${BUILD_DIR}/red_garden_matchmaker" \
+  "${ROOT_DIR}/apps/matchmaker/src/main.c"

@@ -18,11 +18,65 @@
 #endif
 
 #include "../../../packages/common/protocol.h"
+#include "../../../packages/common/hmac_sha256.h"
 #include "../../../packages/simulation/local_game.h"
 
 static int sock = -1;
 static struct sockaddr_in bind_addr;
 static unsigned int client_last_seq[MAX_CLIENTS];
+
+// Connect-ticket verification — same scheme as shankpit-460 (see
+// shankpit-460/apps/server/src/main.c and IDUNA's ShankpitTicketHandler,
+// internal/http/handlers/shankpit_ticket.go): player_id (16 raw bytes) ||
+// expires_at (4-byte LE unix timestamp) || HMAC-SHA256(secret, the first
+// 20 bytes) truncated to 16 bytes, appended after the NetHeader in a
+// PACKET_CONNECT payload. REDGARDEN reuses the same wire format and the
+// same self-contained hmac_sha256.h; test bots self-mint tickets with the
+// shared secret (see apps/client/bot_main.c), matching the emily-bot
+// pattern rather than requiring a real IDUNA JWT per bot.
+#define TICKET_PAYLOAD_LEN 20
+#define TICKET_MAC_LEN 16
+#define TICKET_TOTAL_LEN (TICKET_PAYLOAD_LEN + TICKET_MAC_LEN)
+static unsigned char ticket_secret[256];
+static int ticket_secret_len = 0;
+
+// verify_connect_ticket fails closed: if REDGARDEN_TICKET_SECRET is unset,
+// every ticket is rejected rather than silently accepting connects.
+static int verify_connect_ticket(const char *buffer, int size) {
+    if (ticket_secret_len == 0) return 0;
+    if (size < (int)sizeof(NetHeader) + TICKET_TOTAL_LEN) return 0;
+
+    const unsigned char *ticket = (const unsigned char *)(buffer + sizeof(NetHeader));
+    const unsigned char *payload = ticket;
+    const unsigned char *given_mac = ticket + TICKET_PAYLOAD_LEN;
+
+    unsigned char expected_mac[32];
+    hmac_sha256(ticket_secret, (size_t)ticket_secret_len, payload, TICKET_PAYLOAD_LEN, expected_mac);
+    if (!hmac_sha256_verify(given_mac, expected_mac, TICKET_MAC_LEN)) {
+        return 0;
+    }
+
+    unsigned int expires_at =
+        (unsigned int)payload[16] | ((unsigned int)payload[17] << 8) |
+        ((unsigned int)payload[18] << 16) | ((unsigned int)payload[19] << 24);
+    if ((unsigned int)time(NULL) > expires_at) {
+        return 0;
+    }
+    return 1;
+}
+
+static void load_ticket_secret(void) {
+    const char *env = getenv("REDGARDEN_TICKET_SECRET");
+    if (!env || !env[0]) {
+        printf("WARNING: REDGARDEN_TICKET_SECRET not set — all connect attempts will be rejected (fail closed, not fail open)\n");
+        return;
+    }
+    size_t len = strlen(env);
+    if (len > sizeof(ticket_secret)) len = sizeof(ticket_secret);
+    memcpy(ticket_secret, env, len);
+    ticket_secret_len = (int)len;
+    printf("REDGARDEN_TICKET_SECRET loaded (%d bytes)\n", ticket_secret_len);
+}
 
 static unsigned int get_server_time(void) {
 #ifdef _WIN32
@@ -34,7 +88,7 @@ static unsigned int get_server_time(void) {
 #endif
 }
 
-static void server_net_init(void) {
+static void server_net_init(int port) {
     setbuf(stdout, NULL);
     #ifdef _WIN32
     WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
@@ -46,13 +100,13 @@ static void server_net_init(void) {
     int flags = fcntl(sock, F_GETFL, 0); fcntl(sock, F_SETFL, flags | O_NONBLOCK);
     #endif
     bind_addr.sin_family = AF_INET;
-    bind_addr.sin_port = htons(6969);
+    bind_addr.sin_port = htons((uint16_t)port);
     bind_addr.sin_addr.s_addr = INADDR_ANY;
     if (bind(sock, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0) {
-        printf("FAILED TO BIND PORT 6969\n");
+        printf("FAILED TO BIND PORT %d\n", port);
         exit(1);
     }
-    printf("SERVER LISTENING ON PORT 6969\nWaiting...\n");
+    printf("SERVER LISTENING ON PORT %d\nWaiting...\n", port);
 }
 
 static void server_handle_packet(struct sockaddr_in *sender, char *buffer, int size) {
@@ -70,6 +124,12 @@ static void server_handle_packet(struct sockaddr_in *sender, char *buffer, int s
     }
 
     if (client_id == -1 && head->type == PACKET_CONNECT) {
+        // Verify the connect ticket BEFORE allocating any slot — invalid,
+        // missing, or expired tickets (or an unconfigured secret, which
+        // fails closed) are silently dropped: no slot consumed, no Welcome.
+        if (!verify_connect_ticket(buffer, size)) {
+            return;
+        }
         for (int i = 1; i < MAX_CLIENTS; i++) {
             if (!local_state.client_active[i]) {
                 client_id = i;
@@ -133,8 +193,15 @@ static void server_broadcast(void) {
     }
 }
 
-int main(void) {
-    server_net_init();
+int main(int argc, char *argv[]) {
+    int port = 6969;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
+            port = atoi(argv[++i]);
+        }
+    }
+    load_ticket_secret();
+    server_net_init(port);
     local_init_match(2);
     int running = 1;
     while (running) {

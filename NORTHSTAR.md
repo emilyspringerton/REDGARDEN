@@ -26,6 +26,18 @@ it's cheap to iterate; port proven mechanics to TrapX once they hold up.
 - Card hand UI should have **League of Legends-style affordances** — the polish/legibility bar
   (clean cooldown sweep, cost/availability feedback, hover/target clarity), not a genre change.
   Explicitly *not* an autobattler, corrected in the same breath it was raised.
+- **All shop/menu surfaces need high-APM affordances, designed for pro-level play speed
+  (2026-07-23, refined).** Generalized from the cooking/crafting direction
+  (`docs/CONSUMABLES_AND_COOKING.md`) into a hard cross-cutting constraint: item shop, cooking,
+  crafting, and any future menu must be fast enough for a high-speed pro player, not a casual
+  point-and-click inventory screen. This is **not** keybind-only — click targeting/placement is
+  still core to this game (card drag-and-drop, hero movement/targeting) — the bar is that both
+  input paths (keybind and click) need to resolve instantly with no menu-diving, the way LoL's
+  actual competitive scene uses a mix of hotkeys and precise clicks at high APM, not either one
+  exclusively. **Must still read clearly to a casual player** (2026-07-23) — same "easy to learn,
+  hard to master" bar already set for WEAKNIGHT's F1 handling in the sibling SHANKPIT repo: speed
+  is optional depth for pro players, not a requirement just to understand the menu, and
+  default/obvious options must stay legible without memorizing keybinds first.
 - **Multiplayer** is required — not scoped further yet (real-time PvP matching the Clash Royale
   model implies synchronous multiplayer as the actual target mode, local/bot play as the
   dev/testing mode it already has).
@@ -58,6 +70,32 @@ only — implicit `usleep` declaration, missing `<unistd.h>` include, trivial fi
 (the actual SDL2/OpenGL rendered client — grid rendering, card hand UI, drag-and-drop) **fails to
 build on this box**: `GL/glu.h` missing, same root cause hit tonight on `shankpit-460`. Fix queued
 at `~/sudo-queue/05-install-glu-dev.sh` (not yet run — needs sudo).
+
+**Update 2026-07-23 — `GL/glu.h` fixed, VS0/VS1 validated, matchmaking + accounts shipped:**
+`libglu1-mesa-dev` installed (`~/sudo-queue/05-install-glu-dev.sh` run); `apps/lobby` and
+`apps/arena` now build clean too. Also fixed the `usleep` warning at the root cause —
+`-std=c99` was hiding the POSIX declaration even with `<unistd.h>` included; added
+`-D_DEFAULT_SOURCE` to `scripts/build.sh`'s `COMMON_FLAGS`.
+
+VS0 (bot-vs-bot match works) and VS1 (online play validated with 10 independent headless bots)
+are both done, exercised together by the new `scripts/test_10_bots.sh`:
+- **Accounts**: connect-ticket auth, same scheme as shankpit-460 (`packages/common/hmac_sha256.h`
+  ported verbatim, RFC 4231 test vectors re-verified in this repo). `apps/server` gates
+  `PACKET_CONNECT` on a valid ticket, fails closed if `REDGARDEN_TICKET_SECRET` is unset. Test
+  bots self-mint tickets with the shared secret (mirrors shankpit-460's `emily-bot` pattern) —
+  no real IDUNA account/JWT needed for headless QA.
+- **Matchmaking**: new `apps/matchmaker` — REDGARDEN's simulation is one match per process (a
+  single global `ServerState`, owners indexed 0-2), so "matchmaking" here means queuing
+  `PACKET_FIND_MATCH` requests, pairing two at a time, and spawning a fresh `red_garden_server`
+  on its own port per match (`fork`+`exec`, `SIGCHLD` ignored to auto-reap). `apps/server` gained
+  a `--port` flag to support this. New `PACKET_FIND_MATCH`/`PACKET_MATCH_FOUND`/`MatchFoundMsg`
+  wire additions in `packages/common/protocol.h`.
+- **Validated**: `scripts/test_10_bots.sh` boots the matchmaker, launches N bots (default 10),
+  confirms the expected number of matches spawn, all bots connect, and everything survives 10s of
+  sustained play with zero crashes. Ran clean at 10 bots / 5 concurrent matches.
+- **Scope note**: this validates the existing card-RTS server+bot (`apps/server`,
+  `apps/client`), not `apps/lobby` (still no build target wiring lobby into this flow) or
+  `apps/arena` (separate demo, unaffected).
 
 ## 3.5. `apps/arena` — playable single-hero click-to-move demo (2026-07-23)
 
@@ -242,3 +280,41 @@ rather than something the player directly plays as fighter/mage/assassin does in
 No taxonomy or ratio decided yet (how many direct-control vs. indirect-control heroes a healthy
 roster needs is an open question) — flagged here so the later mechanics pass (§6, §7) designs
 toward that mix on purpose rather than defaulting every hero into a conventional role by habit.
+
+## 9. Hero + item content pass (2026-07-23)
+
+`docs/HEROES_VS0.md` — concrete VS0 ability kits for all nine queued §7 heroes plus TYLER (an
+exact reskin of DOTA's classic "OG" Meepo, including the unforgiving all-clones-share-one-death
+rule, per direct founder request), and a starting item roster styled on LoL Season 3's item
+*archetypes* (crit carry, on-hit carry, burst mage, utility mage, tank initiator, tank/MR,
+lifesteal duelist, penetration lines, support aura) rather than its specific names. Several heroes
+(The Tree, The Pizza, The Retrieval Cart, Doc Wheel) get a RED GARDEN-specific passive that
+touches the living cellular-automata grid (§1/§8) directly, not just combat stats. Content only —
+no code wired into `packages/simulation/local_game.c` yet, no balance pass.
+
+## 10. Match history, replays, spectator mode, esports (2026-07-23) — future direction, not this pass
+
+Founder direction, explicitly deferred beyond the 24-hour VS0/VS1 validation push (§2 update):
+match history is needed both for future ML bot training (the existing neural-net bot approach —
+see `apps/arena`'s hand-authored feed-forward net, and `SHANKPIT/packages/simulation/neural_net.h`
+which it borrows its shape from — implies a training pipeline will eventually want real match data
+to learn from) and for community moderation/maintenance (dispute resolution, anti-cheat review).
+Replays, a spectator mode, and eventual esports support are the natural next layer on top of that
+same data, but are explicitly *not* in scope for the current push — "esports is not in 24 hours."
+
+**What this pass actually adds, as the minimum hook to not make that harder later:** each
+`red_garden_server` instance (one per match, per §2's matchmaker) appends a simple newline-
+delimited JSON event log for its own match — connects, card plays, and the eventual win condition
+— to `var/matches/<port>-<timestamp>.jsonl`. This is deliberately just a data-capture hook, not a
+replay system: no player-facing playback, no spectator wire protocol, no ranking/ladder work. It
+exists so that when replays/ML-training/esports work actually starts, there's already a real
+corpus of match data to build against instead of starting from zero.
+
+## 11. Cooking + crafting (2026-07-23) — future direction, not this pass
+
+`docs/CONSUMABLES_AND_COOKING.md` — a curated consumable/item name pool mined from
+`gitlab.com/mailtruck/creepy-carrots` (tone-matched to the roster's existing absurdist register),
+plus the founder's cooking (mid-match, resources → cooked buffs) and crafting (mid-game, resources
+→ items alongside the direct-purchase roster) direction. Neither is mechanically designed or
+implemented yet — captured so later passes on the item roster or the resource economy don't design
+against it by accident.

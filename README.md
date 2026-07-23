@@ -1,4 +1,40 @@
-RED GARDEN
+# RED GARDEN
+
+## Current Status (2026-07-23)
+
+See `NORTHSTAR.md` for the full, up-to-date direction — this README's "Acceptance Criteria" and
+"Full Technical Design Document" sections below are the original design capture and are not all
+built yet. What's actually real, right now:
+
+- **VS0 (bot-vs-bot matches)** and **VS1 (online play, matchmaking, accounts)** are both validated
+  end to end: `scripts/test_10_bots.sh` boots a matchmaker + 10 headless bots, confirms 5
+  concurrent matches spawn and connect, and survives 10s of sustained play with zero crashes.
+- **Accounts**: connect-ticket auth (HMAC-SHA256, same scheme as sibling repo shankpit-460) — see
+  `packages/common/hmac_sha256.h`. `apps/server` verifies tickets on connect, fails closed without
+  `REDGARDEN_TICKET_SECRET`.
+- **Matchmaking**: `apps/matchmaker` — this simulation is one match per process by design, so
+  matchmaking means pairing queued clients and spawning a dedicated `red_garden_server --port <N>`
+  per match.
+- **Content (not yet wired into code)**: `docs/HEROES_VS0.md` (hero kits, including TYLER as an
+  exact reskin of DOTA's classic Meepo) and `docs/CONSUMABLES_AND_COOKING.md` (item/consumable
+  names, cooking/crafting direction).
+- **Not yet built**: `apps/lobby` (the real SDL2/OpenGL rendered client) builds, but isn't wired
+  into the matchmaker/ticket flow above; no packaged/distributable client exists yet.
+
+### Build & Run
+
+```bash
+bash scripts/build.sh              # builds red_garden_server, _bot, _lobby, _matchmaker into build/
+bash scripts/test_10_bots.sh        # VS0/VS1 validation: matchmaker + 10 headless bots
+bash scripts/test_10_bots.sh 4      # or pass a different bot count (must be even)
+```
+
+`REDGARDEN_TICKET_SECRET` must be set for any client to connect (fails closed otherwise) — the
+test script sets a default automatically.
+
+---
+
+## RED GARDEN
 Acceptance Criteria (Vertical Slice)
 Render a 20×20 isometric grid with visible cell boundaries.
 Run a cellular-automata tick every 2 seconds for grid state updates.
