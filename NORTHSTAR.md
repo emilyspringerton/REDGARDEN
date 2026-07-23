@@ -292,6 +292,12 @@ lifesteal duelist, penetration lines, support aura) rather than its specific nam
 touches the living cellular-automata grid (§1/§8) directly, not just combat stats. Content only —
 no code wired into `packages/simulation/local_game.c` yet, no balance pass.
 
+`docs/BACKSTORY.md` (2026-07-23) — the in-fiction reason the roster is a roster: Tyler forms a
+loose motorcycle gang, and every §7 hero is a member of it, recruited the way Tyler recruits
+everyone (shows up, doesn't explain himself, stays until someone else can carry it). Explains why
+several heroes leave a mark on the living grid itself rather than just fighting on it — the gang
+was never visiting the board, it was always already there.
+
 ## 10. Match history, replays, spectator mode, esports (2026-07-23) — future direction, not this pass
 
 Founder direction, explicitly deferred beyond the 24-hour VS0/VS1 validation push (§2 update):

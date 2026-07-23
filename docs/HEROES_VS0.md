@@ -2,6 +2,9 @@
 
 *Written: 2026-07-23 | Status: content pass, not implemented in code yet*
 
+See `docs/BACKSTORY.md` for why these nine specific characters are a roster at all — they're
+Tyler's motorcycle gang, not nine strangers a deck-builder happened to draft.
+
 Per founder direction: this is a direct content pass on top of the hero queue in `NORTHSTAR.md`
 §7 — no ability framework/engine work first, just concrete kits. Stat system leans heavily on
 LoL/DOTA-familiar terms (attack damage, ability power, armor, magic resist, penetration, CDR,
