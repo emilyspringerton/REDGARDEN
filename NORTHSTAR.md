@@ -184,3 +184,15 @@ grid) into the hero pass (§6/§7) as one system, not two parallel ones.
 Not scoped further yet — no map file, no automata-to-hero binding code, no node count decided.
 Captured here as real design direction before either the ecology grid or the hero queue (§7) get
 built out further, so the two don't end up designed against each other.
+
+**Indirect-control archetypes are a deliberate roster feature, not a gap (2026-07-23).** Founder
+observation: a meaningful slice of the queued heroes already don't fit the standard MOBA taxonomy
+(mage / assassin / tank / support) — the Retrieval Cart (§7, #10) is explicitly "a world event
+attached to a lane" rather than a unit a player commands, and the ecology-driven presences above are
+by definition not directly piloted at all. This is read as a real, load-bearing part of the roster's
+identity, not smoothed toward conventional kits: RED GARDEN's hero pool should keep room for heroes
+whose whole hook is indirect control — something the player influences, times, or benefits from
+rather than something the player directly plays as fighter/mage/assassin does in a traditional MOBA.
+No taxonomy or ratio decided yet (how many direct-control vs. indirect-control heroes a healthy
+roster needs is an open question) — flagged here so the later mechanics pass (§6, §7) designs
+toward that mix on purpose rather than defaulting every hero into a conventional role by habit.
