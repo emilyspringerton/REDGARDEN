@@ -106,3 +106,19 @@ Swarmlings/Outpost, §3) — no named heroes yet. Nothing here commits RED GARDE
 any specific card mechanics; per the compendium's own stated order, abilities and stats get designed
 *from* the lore in a later pass, once specific heroes are chosen to work on, not assumed now. Noted
 as a real, live cross-repo connection rather than left implicit.
+
+## 7. Hero implementation queue (started 2026-07-23)
+
+Founder-tiered picks from `TYLER/multiverse_heroes.md`, tracked here as they're chosen — this list
+is the actual "which ones get built first" answer §6 explicitly left open. Append-only as more get
+picked; update status in place as work starts/lands. No abilities/stats/card mechanics designed for
+any entry below yet — that's still the deliberately-deferred later pass §6 already named.
+
+| Tier | Hero | Compendium # | Status |
+|---|---|---|---|
+| S | Zhang Guo Lao's Donkey | #38 (Faction 4 — Middle Kingdom Heirs) | Not started |
+
+**#38, for context:** "The famous Immortal's donkey, given its own story for once." Traditionally
+folds up like paper when not needed and unfolds when it is — the founder's S-tier pick turns that
+into its own character rather than a joke prop: a hero whose entire nature is showing up exactly
+when required and disappearing, without complaint, the rest of the time.
