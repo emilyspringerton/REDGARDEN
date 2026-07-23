@@ -303,16 +303,17 @@ static void spawn_ring(float x, float z) {
 /* ---------------- camera ---------------- */
 static float cam_yaw = 45.0f, cam_pitch = 40.0f, cam_dist = 16.0f;
 
-static void camera_basis(float *eye_x, float *eye_y, float *eye_z,
+static void camera_basis(float focus_x, float focus_z,
+                          float *eye_x, float *eye_y, float *eye_z,
                           float *fwd_x, float *fwd_y, float *fwd_z,
                           float *right_x, float *right_y, float *right_z,
                           float *up_x, float *up_y, float *up_z) {
     float yaw = cam_yaw * (float)M_PI / 180.0f;
     float pitch = cam_pitch * (float)M_PI / 180.0f;
-    *eye_x = cam_dist * cosf(pitch) * sinf(yaw);
+    *eye_x = focus_x + cam_dist * cosf(pitch) * sinf(yaw);
     *eye_y = cam_dist * sinf(pitch);
-    *eye_z = cam_dist * cosf(pitch) * cosf(yaw);
-    float fx = -*eye_x, fy = -*eye_y, fz = -*eye_z;
+    *eye_z = focus_z + cam_dist * cosf(pitch) * cosf(yaw);
+    float fx = focus_x - *eye_x, fy = -*eye_y, fz = focus_z - *eye_z;
     float flen = sqrtf(fx * fx + fy * fy + fz * fz);
     *fwd_x = fx / flen; *fwd_y = fy / flen; *fwd_z = fz / flen;
     float upx = 0, upy = 1, upz = 0;
@@ -327,9 +328,10 @@ static void camera_basis(float *eye_x, float *eye_y, float *eye_z,
 }
 
 /* Intersects the mouse ray with the y=0 ground plane. Returns 1 on hit. */
-static int screen_to_ground(int mx, int my, int w, int h, float fov_deg, float *out_x, float *out_z) {
+static int screen_to_ground(int mx, int my, int w, int h, float fov_deg,
+                             float focus_x, float focus_z, float *out_x, float *out_z) {
     float eye_x, eye_y, eye_z, fx, fy, fz, rx, ry, rz, ux, uy, uz;
-    camera_basis(&eye_x, &eye_y, &eye_z, &fx, &fy, &fz, &rx, &ry, &rz, &ux, &uy, &uz);
+    camera_basis(focus_x, focus_z, &eye_x, &eye_y, &eye_z, &fx, &fy, &fz, &rx, &ry, &rz, &ux, &uy, &uz);
     float ndc_x = (2.0f * mx / w) - 1.0f;
     float ndc_y = 1.0f - (2.0f * my / h);
     float aspect = (float)w / (float)h;
@@ -418,7 +420,9 @@ int main(int argc, char *argv[]) {
             if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT &&
                 arena_state.winner == 0) {
                 float gx, gz;
-                if (screen_to_ground(e.button.x, e.button.y, win_w, win_h, 60.0f, &gx, &gz)) {
+                float focus_x = arena_state.heroes[0].x, focus_z = arena_state.heroes[0].z;
+                if (screen_to_ground(e.button.x, e.button.y, win_w, win_h, 60.0f,
+                                     focus_x, focus_z, &gx, &gz)) {
                     arena_set_move_target(0, gx, gz);
                     spawn_ring(gx, gz);
                 }
@@ -442,9 +446,8 @@ int main(int argc, char *argv[]) {
         glClearColor(0.03f, 0.05f, 0.04f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        float eye_x, eye_y, eye_z, fx, fy, fz, rx, ry, rz, ux, uy, uz;
-        camera_basis(&eye_x, &eye_y, &eye_z, &fx, &fy, &fz, &rx, &ry, &rz, &ux, &uy, &uz);
-        Mat4 view = mat4_orbit_view(0, 0, 0, cam_yaw, cam_pitch, cam_dist);
+        float focus_x = arena_state.heroes[0].x, focus_z = arena_state.heroes[0].z;
+        Mat4 view = mat4_orbit_view(focus_x, 0, focus_z, cam_yaw, cam_pitch, cam_dist);
         Mat4 proj = mat4_perspective(60.0f, (float)win_w / (float)win_h, 0.1f, 100.0f);
         Mat4 vp = mat4_multiply(&proj, &view);
 
