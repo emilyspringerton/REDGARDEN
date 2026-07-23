@@ -174,6 +174,45 @@ unforgiving) "OG" clone-death rule, reskinned as TYLER rather than renamed into 
   requested**: all clones share a single pool of fate — if any one TYLER dies, every TYLER dies,
   no exceptions. High-risk, high-reward, exactly like the original.
 
+### Flamel — **Support — Master Cook**
+
+Nicolas Flamel, already in `TYLER/multiverse_heroes.md`'s roster of reframed real historical
+figures, added here as the roster's first hero whose entire kit is the cooking system
+(`docs/CONSUMABLES_AND_COOKING.md`) made literal — not a support who happens to also cook,
+a cook whose support comes from cooking.
+
+- **Passive — The Great Work**: Flamel's cooked consumables are stronger and cheaper when he
+  personally prepares them versus anyone else using the same station — alchemy, not recipe-
+  following.
+- **Q — Transmutation**: Converts one held raw resource into a different raw resource type
+  (Orange → any other base ingredient), at a conversion cost — lets the team route around a
+  contested node instead of being locked out of a recipe by it.
+- **W — Philosopher's Batch**: Cooks a consumable for every nearby ally at once, instead of one
+  at a time — the kit's actual throughput advantage over any other hero cooking manually.
+- **R — Elixir of Life**: A single powerful team-wide consumable, cooked once per game (long
+  cooldown, no raw-resource cost) — the "master" part of master cook, reserved for exactly the
+  moment a team decides to commit.
+
+### Druid — **Fighter/Support — Tree-Growy, RED GARDEN passive**
+
+A nature-growth archetype distinct from The Tree (which is static and already planted) — the
+Druid moves, and brings growth with it, fitting a Highlands-style setting (nature terrain,
+LoL's own Summoner's Rift register) rather than The Tree's single-fixed-position gimmick.
+
+- **Passive — Overgrowth**: Cells the Druid walks across gain a temporary growth marker; a marked
+  cell that ends a tick still `NEUTRAL` has an increased chance of converting toward whoever
+  marked it — the Druid seeds conversions across a wider area than The Tree's single standing
+  spot, at the cost of not holding any one of them as reliably.
+- **Q — Vine Growth**: Grows a temporary wall of vines in a line — blocks movement/vision, decays
+  after a few seconds (grows, not summons — consistent with the "tree-growy" framing over a
+  generic wall spell).
+- **W — Bloom**: Heals an ally and, if cast on a cell the Druid has marked (see passive), heals for
+  more — rewards playing on your own seeded ground.
+- **R — Wild Growth**: A large area rapidly overgrows — heavy slow to enemies caught in it, minor
+  heal-over-time to allies, and every cell inside gets an Overgrowth marker simultaneously. The
+  Druid's answer to a fixed teamfight, matching The Tree's area-control role without copying its
+  stand-still identity.
+
 ---
 
 ## Starting Item Roster (VS0)
@@ -207,3 +246,9 @@ Mixed in, not copy-pasted 1:1.
 - No card-hand integration decided yet: whether heroes replace or sit alongside the existing
   4-card roster (Militia/Scout/Swarmlings/Outpost) is a separate design question.
 - Remaining compendium entries beyond this queue are out of scope for this pass.
+- **Flagged, not built**: founder noted a potential Morrigan/Druid relationship (both Highland-
+  Court-flavored per `TYLER/multiverse_heroes.md`'s Faction 6) that's deliberately both — a good
+  ally pairing in some lines (shared Highland-Court territory control) and real rock-paper-
+  scissors counter-play in others (the Morrigan's war/death kit against the Druid's life/growth
+  kit), not a strictly-synergy or strictly-counter relationship either way. No Morrigan kit
+  written yet — this is a hook for the next hero pass, not a commitment made here.

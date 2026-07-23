@@ -246,6 +246,11 @@ grid) into the hero pass (§6/§7) as one system, not two parallel ones.
   across a match the same way the corruption-spread automata already does — distinct from the cards
   a player actively deploys. §1's existing "not an autobattler" line still holds: players still
   actively deploy their hand; the ecology is the board itself reacting back, not another player.
+- **Setting note (2026-07-23):** the concept overlaps heavily with FIELDOFFICE/TrapX's alive-city
+  metaverse, and a TrapX-skinned version of RED GARDEN is worth exploring later — but this pass
+  develops RED GARDEN on its own simpler premise first, without forcing every hero/mob into a
+  city-dweller frame. A Highlands-style nature setting (matching LoL's own Summoner's Rift
+  register) reads better for the actual target audience than an urban TrapX reskin would.
 - **Map shape: Arathi Basin, with more jungle — 10v10, 5 nodes.** A direct reference to WoW's
   classic capture-and-hold battleground: 5 resource nodes (Arathi Basin's own count — Stables, Gold
   Mine, Lumber Mill, Farm, Blacksmith, or this game's equivalent naming) spread across open ground,
