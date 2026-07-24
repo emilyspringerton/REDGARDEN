@@ -13,9 +13,70 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "../../../packages/common/mat4.h"
 #include "../../../packages/simulation/arena_game.h"
+
+/* Match event log — MOBA half of NORTHSTAR §12 Phase B (EMILY/BACKLOG.md
+ * S170-29), extending apps/server's S170-28 pattern to this demo. Same
+ * "minimum hook, not a replay system" philosophy: one JSON line per event
+ * to var/matches/arena-<timestamp>.jsonl. Unlike apps/server, this client
+ * has no networking or connect-ticket auth at all, so there's no real WOTAN
+ * player_id to attach -- "local_player"/"local_bot" are honest placeholders,
+ * not a guess at an identity that doesn't exist yet. Real identity
+ * attribution for arena replays is blocked on arena getting connect-ticket
+ * auth in the first place, which is out of scope here. */
+static FILE *arena_log_fp = NULL;
+static uint32_t arena_log_elapsed_ms = 0;
+static uint32_t arena_log_since_snapshot_ms = 0;
+#define ARENA_LOG_SNAPSHOT_INTERVAL_MS 500
+
+static void arena_log_open(void) {
+    mkdir("var", 0755);
+    mkdir("var/matches", 0755);
+    char path[256];
+    snprintf(path, sizeof(path), "var/matches/arena-%ld.jsonl", (long)time(NULL));
+    if (arena_log_fp) fclose(arena_log_fp);
+    arena_log_fp = fopen(path, "a");
+    if (!arena_log_fp) {
+        fprintf(stderr, "WARNING: could not open arena match log %s -- match will not be logged (S170-29)\n", path);
+        return;
+    }
+    arena_log_elapsed_ms = 0;
+    arena_log_since_snapshot_ms = 0;
+    fprintf(arena_log_fp, "{\"event\":\"match_start\",\"ts_ms\":0}\n");
+    fflush(arena_log_fp);
+    printf("Arena match event log: %s\n", path);
+}
+
+static void arena_log_snapshot(void) {
+    if (!arena_log_fp) return;
+    ArenaHero *p = &arena_state.heroes[0];
+    ArenaHero *b = &arena_state.heroes[1];
+    fprintf(arena_log_fp,
+            "{\"event\":\"snapshot\",\"ts_ms\":%u,"
+            "\"player\":{\"id\":\"local_player\",\"x\":%.2f,\"z\":%.2f,\"hp\":%d},"
+            "\"bot\":{\"id\":\"local_bot\",\"x\":%.2f,\"z\":%.2f,\"hp\":%d}}\n",
+            arena_log_elapsed_ms, p->x, p->z, p->hp, b->x, b->z, b->hp);
+    fflush(arena_log_fp);
+}
+
+static void arena_log_ability(const char *ability) {
+    if (!arena_log_fp) return;
+    fprintf(arena_log_fp, "{\"event\":\"ability_cast\",\"player_id\":\"local_player\",\"ability\":\"%s\",\"ts_ms\":%u}\n",
+            ability, arena_log_elapsed_ms);
+    fflush(arena_log_fp);
+}
+
+static void arena_log_win(int winner) {
+    if (!arena_log_fp) return;
+    const char *winner_id = (winner == 1) ? "local_player" : "local_bot";
+    fprintf(arena_log_fp, "{\"event\":\"match_end\",\"winner\":\"%s\",\"ts_ms\":%u}\n", winner_id, arena_log_elapsed_ms);
+    fflush(arena_log_fp);
+}
 
 /* ---------------- manually-loaded GL 3.x function pointers ---------------- */
 static PFNGLCREATESHADERPROC glCreateShader_;
@@ -381,16 +442,19 @@ int main(int argc, char *argv[]) {
     glEnable(GL_DEPTH_TEST);
 
     arena_init();
+    arena_log_open();
 
     int dragging_cam = 0;
     int last_mx = 0, last_my = 0;
     int running = 1;
+    int win_logged = 0;
     uint32_t last_tick = SDL_GetTicks();
 
     while (running) {
         uint32_t now = SDL_GetTicks();
         uint32_t dt = now - last_tick;
         last_tick = now;
+        arena_log_elapsed_ms += dt;
 
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -430,19 +494,29 @@ int main(int argc, char *argv[]) {
             if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_r) {
                 arena_init();
                 memset(rings, 0, sizeof(rings));
+                arena_log_open(); /* fresh match -> fresh log file, S170-29 */
+                win_logged = 0;
             }
             /* The Unicorn's kit (docs/HEROES_VS0.md) — player hero (owner 0) only,
              * S170-18. R is already bound to "restart match" in this demo, so the
              * ultimate goes on E rather than colliding with it. */
             if (e.type == SDL_KEYDOWN && arena_state.winner == 0) {
-                if (e.key.keysym.sym == SDLK_q) arena_cast_q(0);
-                if (e.key.keysym.sym == SDLK_w) arena_toggle_w(0);
-                if (e.key.keysym.sym == SDLK_e) arena_cast_r(0);
+                if (e.key.keysym.sym == SDLK_q) { arena_cast_q(0); arena_log_ability("Q"); }
+                if (e.key.keysym.sym == SDLK_w) { arena_toggle_w(0); arena_log_ability("W"); }
+                if (e.key.keysym.sym == SDLK_e) { arena_cast_r(0); arena_log_ability("R"); }
             }
         }
 
         if (arena_state.winner == 0) {
             arena_update(dt);
+            arena_log_since_snapshot_ms += dt;
+            if (arena_log_since_snapshot_ms >= ARENA_LOG_SNAPSHOT_INTERVAL_MS) {
+                arena_log_snapshot();
+                arena_log_since_snapshot_ms = 0;
+            }
+        } else if (!win_logged) {
+            arena_log_win(arena_state.winner);
+            win_logged = 1;
         }
         for (int i = 0; i < MAX_RINGS; i++) {
             if (!rings[i].active) continue;

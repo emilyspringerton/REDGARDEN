@@ -382,10 +382,20 @@ grid position), and `match_end` (winner) — verified against real match logs fr
 `scripts/test_10_bots.sh`, not just read from the code. `var/` added to `.gitignore` (generated
 data, not source).
 
-**Not done yet — the MOBA half (`apps/arena`).** `apps/arena` is a separate binary with its own
-per-tick hero-state loop (position/HP/ability cooldowns, see `packages/simulation/arena_game.c`);
-extending the same event-log pattern there is a distinct, not-yet-started piece of this phase, not
-covered by this pass.
+**Done — the MOBA half (`apps/arena`), S170-29.** `apps/arena/src/main.c` now opens
+`var/matches/arena-<timestamp>.jsonl` (fresh file per match, including on `R`-key restart) and
+appends `match_start`, a `snapshot` event every 500ms (both heroes' x/z/hp — a fixed low rate
+rather than true per-physics-tick, to keep log size sane, same spirit as real esports replay
+systems), `ability_cast` (Q/W/R presses), and `match_end`. **Real gap flagged, not papered over:**
+`apps/arena` has no networking or connect-ticket auth at all, so there's no real WOTAN `player_id`
+to attach here — events use `"local_player"`/`"local_bot"` placeholders. Real identity attribution
+for arena replays is blocked on arena getting connect-ticket auth in the first place, which is a
+separate, larger, not-yet-scoped piece of work. Also flagged: this box has no display (no Xvfb),
+so this was verified by code review + a clean compile (`scripts/build_arena.sh`), not by actually
+running the windowed client end-to-end the way `apps/server`'s log was verified against real
+`test_10_bots.sh` output.
+
+Phase B is now closed for both halves (RTS + MOBA) under this box's constraints.
 
 **Phase C — Observer mode, first-class.** Founder: "observer mode is a first class citizen." Not
 a bolted-on debug view — a real client mode that reads Phase B's logs (live-tailing an in-progress

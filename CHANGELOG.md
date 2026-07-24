@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-07-24 (3)
+
+- NORTHSTAR §12 Phase B (replay logging, S170-29) closed for the MOBA half: `apps/arena` now
+  opens `var/matches/arena-<timestamp>.jsonl` (fresh per match, including on restart) and appends
+  `match_start`/`snapshot` (every 500ms, both heroes' x/z/hp)/`ability_cast`/`match_end` events.
+  No connect-ticket auth exists in this client, so events use `"local_player"`/`"local_bot"`
+  placeholders rather than a guessed WOTAN player_id -- flagged as a real gap, not silently faked.
+  Verified by clean compile (`scripts/build_arena.sh`) and code review only -- this box has no
+  display, so unlike the RTS half this couldn't be run end-to-end. `scripts/test_arena.sh`
+  (headless sim tests, untouched by this change) still green.
+
 ## 2026-07-24 (2)
 
 - NORTHSTAR §12 Phase B (replay logging, S170-28) started for the RTS half: `apps/server` now
