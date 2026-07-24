@@ -11,8 +11,14 @@
 // Ports the already-proven pieces from apps/server/src/main.c verbatim
 // rather than re-deriving them: connect-ticket verification
 // (packages/common/hmac_sha256.h), IDUNA agent config + WOTAN match-result
-// reporting (packages/common/http_client.h). Two hero slots only (1v1) --
-// 10v10/N-player is explicitly deferred until 1v1 human PvP is proven fun.
+// reporting (packages/common/http_client.h).
+//
+// --lobby-size N (default 2): 1v1 (the originally-shipped, live-verified
+// mode) uses arena_init/arena_update -- completely unchanged behavior.
+// N > 2 (up to ARENA_MAX_HEROES) uses arena_init_teams/arena_update_teams
+// (NORTHSTAR §13 cont'd, 10v10 scaling) -- every slot is a real network
+// client (human or a real apps/arena_bot process); there is no internal
+// bot-AI fallback in team mode, unlike 1v1's solo-vs-bot practice default.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,20 +45,22 @@
 #include "../../../packages/common/http_client.h"
 #include "../../../packages/simulation/arena_game.h"
 
-#define ARENA_MAX_CLIENTS 2
+static int lobby_size = 2; /* --lobby-size; 2 = original 1v1 mode, up to ARENA_MAX_HEROES for team mode */
 
 static int sock = -1;
 static struct sockaddr_in bind_addr;
-static struct sockaddr_in clients[ARENA_MAX_CLIENTS];
-static int client_active[ARENA_MAX_CLIENTS];
-static unsigned char client_player_id[ARENA_MAX_CLIENTS][16];
-static int client_has_player_id[ARENA_MAX_CLIENTS];
+static struct sockaddr_in clients[ARENA_MAX_HEROES];
+static int client_active[ARENA_MAX_HEROES];
+static int client_count = 0;
+static unsigned char client_player_id[ARENA_MAX_HEROES][16];
+static int client_has_player_id[ARENA_MAX_HEROES];
 
 /* Draft phase (2026-07-24): heroes used to be hardcoded (Unicorn vs Duck) --
- * now both real players pick before the match clock starts. */
+ * now every real player picks before the match clock starts. */
 static int match_phase = ARENA_PHASE_WAITING;
-static int hero_picked[ARENA_MAX_CLIENTS];
-static int hero_pick[ARENA_MAX_CLIENTS];
+static int hero_picked[ARENA_MAX_HEROES];
+static int hero_pick[ARENA_MAX_HEROES];
+static int picked_count = 0;
 
 // ---- connect-ticket verification (ported verbatim from apps/server) ----
 #define TICKET_PAYLOAD_LEN 20
@@ -173,11 +181,12 @@ static void report_match_result(int winner) {
         return;
     }
 
-    for (int owner = 0; owner < ARENA_MAX_CLIENTS; owner++) {
+    for (int owner = 0; owner < lobby_size; owner++) {
         char pid[37];
         player_id_uuid_str(owner, pid);
         if (pid[0] == '\0') continue;
-        const char *result = ((owner + 1) == winner) ? "win" : "loss";
+        int my_team = arena_state.heroes[owner].team;
+        const char *result = ((my_team + 1) == winner) ? "win" : "loss";
         char body[256];
         snprintf(body, sizeof(body),
                  "{\"player_id\":\"%s\",\"game\":\"redgarden-arena\",\"result\":\"%s\"}", pid, result);
@@ -198,8 +207,10 @@ static unsigned int get_server_time(void) {
 #endif
 }
 
-// ---- match event log (same schema arena_replay.c already parses, so
-// observer-mode/S170-30 keeps working against real networked matches too) ----
+// ---- match event log (same schema arena_replay.c already parses for the
+// 1v1 case, so observer-mode/S170-30 keeps working against real 1v1
+// networked matches; team-mode matches get their own generalized snapshot
+// shape since arena_replay.c only ever knew about 2 heroes) ----
 static FILE *match_log_fp = NULL;
 
 static void match_log_open(int port) {
@@ -212,20 +223,32 @@ static void match_log_open(int port) {
         printf("WARNING: could not open match log %s -- match will not be logged\n", path);
         return;
     }
-    fprintf(match_log_fp, "{\"event\":\"match_start\",\"port\":%d,\"ts_ms\":%u}\n", port, get_server_time());
+    fprintf(match_log_fp, "{\"event\":\"match_start\",\"port\":%d,\"lobby_size\":%d,\"ts_ms\":%u}\n",
+            port, lobby_size, get_server_time());
     fflush(match_log_fp);
     printf("Match event log: %s\n", path);
 }
 
 static void match_log_snapshot(void) {
     if (!match_log_fp) return;
-    ArenaHero *a = &arena_state.heroes[0];
-    ArenaHero *b = &arena_state.heroes[1];
-    fprintf(match_log_fp,
-            "{\"event\":\"snapshot\",\"ts_ms\":%u,"
-            "\"hero0\":{\"x\":%.2f,\"z\":%.2f,\"hp\":%d},"
-            "\"hero1\":{\"x\":%.2f,\"z\":%.2f,\"hp\":%d}}\n",
-            get_server_time(), a->x, a->z, a->hp, b->x, b->z, b->hp);
+    if (lobby_size == 2) {
+        ArenaHero *a = &arena_state.heroes[0];
+        ArenaHero *b = &arena_state.heroes[1];
+        fprintf(match_log_fp,
+                "{\"event\":\"snapshot\",\"ts_ms\":%u,"
+                "\"hero0\":{\"x\":%.2f,\"z\":%.2f,\"hp\":%d},"
+                "\"hero1\":{\"x\":%.2f,\"z\":%.2f,\"hp\":%d}}\n",
+                get_server_time(), a->x, a->z, a->hp, b->x, b->z, b->hp);
+        fflush(match_log_fp);
+        return;
+    }
+    fprintf(match_log_fp, "{\"event\":\"snapshot\",\"ts_ms\":%u,\"heroes\":[", get_server_time());
+    for (int i = 0; i < lobby_size; i++) {
+        ArenaHero *h = &arena_state.heroes[i];
+        fprintf(match_log_fp, "%s{\"owner\":%d,\"team\":%d,\"x\":%.2f,\"z\":%.2f,\"hp\":%d,\"alive\":%d}",
+                i == 0 ? "" : ",", i, h->team, h->x, h->z, h->hp, h->alive);
+    }
+    fprintf(match_log_fp, "]}\n");
     fflush(match_log_fp);
 }
 
@@ -253,7 +276,7 @@ static void server_net_init(int port) {
         printf("FAILED TO BIND PORT %d\n", port);
         exit(1);
     }
-    printf("ARENA SERVER LISTENING ON PORT %d\nWaiting for 2 players...\n", port);
+    printf("ARENA SERVER LISTENING ON PORT %d\nWaiting for %d players...\n", port, lobby_size);
 }
 
 static void server_broadcast(void) {
@@ -263,7 +286,8 @@ static void server_broadcast(void) {
     head.timestamp = get_server_time();
 
     ArenaSnapshotMsg msg = {0};
-    for (int i = 0; i < 2; i++) {
+    msg.count = (uint8_t)lobby_size;
+    for (int i = 0; i < lobby_size; i++) {
         ArenaHero *h = &arena_state.heroes[i];
         msg.heroes[i].x = h->x;
         msg.heroes[i].z = h->z;
@@ -271,16 +295,15 @@ static void server_broadcast(void) {
         msg.heroes[i].max_hp = (uint16_t)h->max_hp;
         msg.heroes[i].alive = (uint8_t)h->alive;
         msg.heroes[i].hero_id = (uint8_t)h->hero_id;
+        msg.picked[i] = (uint8_t)hero_picked[i];
     }
     msg.winner = (uint8_t)arena_state.winner;
     msg.phase = (uint8_t)match_phase;
-    msg.picked[0] = (uint8_t)hero_picked[0];
-    msg.picked[1] = (uint8_t)hero_picked[1];
 
     memcpy(buffer, &head, sizeof(NetHeader));
     memcpy(buffer + sizeof(NetHeader), &msg, sizeof(ArenaSnapshotMsg));
 
-    for (int i = 0; i < ARENA_MAX_CLIENTS; i++) {
+    for (int i = 0; i < lobby_size; i++) {
         if (client_active[i]) {
             sendto(sock, buffer, sizeof(buffer), 0, (struct sockaddr *)&clients[i], sizeof(struct sockaddr_in));
         }
@@ -292,7 +315,7 @@ static void server_handle_packet(struct sockaddr_in *sender, char *buffer, int s
     NetHeader *head = (NetHeader *)buffer;
     int client_id = -1;
 
-    for (int i = 0; i < ARENA_MAX_CLIENTS; i++) {
+    for (int i = 0; i < lobby_size; i++) {
         if (client_active[i] &&
             memcmp(&clients[i].sin_addr, &sender->sin_addr, sizeof(struct in_addr)) == 0 &&
             clients[i].sin_port == sender->sin_port) {
@@ -303,10 +326,12 @@ static void server_handle_packet(struct sockaddr_in *sender, char *buffer, int s
 
     if (client_id == -1 && head->type == PACKET_CONNECT) {
         if (!verify_connect_ticket(buffer, size)) return;
-        for (int i = 0; i < ARENA_MAX_CLIENTS; i++) {
+        if (match_phase != ARENA_PHASE_WAITING) return; // lobby's full/drafting/live -- no late joins in this pass
+        for (int i = 0; i < lobby_size; i++) {
             if (!client_active[i]) {
                 client_id = i;
                 client_active[i] = 1;
+                client_count++;
                 clients[i] = *sender;
                 const unsigned char *ticket_payload = (const unsigned char *)(buffer + sizeof(NetHeader));
                 memcpy(client_player_id[client_id], ticket_payload, 16);
@@ -317,16 +342,18 @@ static void server_handle_packet(struct sockaddr_in *sender, char *buffer, int s
                 h.client_id = (uint8_t)client_id;
                 h.timestamp = get_server_time();
                 sendto(sock, (char *)&h, sizeof(NetHeader), 0, (struct sockaddr *)sender, sizeof(struct sockaddr_in));
-                printf("CLIENT %d CONNECTED (owner %d)\n", client_id, client_id);
+                printf("CLIENT %d CONNECTED (owner %d, %d/%d)\n", client_id, client_id, client_count, lobby_size);
 
-                // Once the second real player connects, stop the internal
-                // hand-authored bot from driving owner 1 -- see
-                // arena_bot_enabled's doc comment in arena_game.h. Enter the
-                // draft instead of going straight to a live match.
-                if (client_id == 1) {
+                // Once the lobby is full, stop any internal bot AI (1v1's
+                // solo-practice fallback -- team mode never enables it at
+                // all, see main()) and enter the draft instead of going
+                // straight to a live match.
+                if (client_count == lobby_size) {
                     arena_bot_enabled = 0;
+                    if (lobby_size == 2) arena_init(); /* 1v1: keeps the exact proven local-demo spawn/state shape */
+                    else arena_init_teams();           /* team mode: N-hero spawn, all placeholder hero_id until picks land */
                     match_phase = ARENA_PHASE_DRAFT;
-                    printf("Second player connected -- internal bot AI disabled, entering draft.\n");
+                    printf("Lobby full (%d players) -- internal bot AI disabled, entering draft.\n", lobby_size);
                 }
                 break;
             }
@@ -341,13 +368,22 @@ static void server_handle_packet(struct sockaddr_in *sender, char *buffer, int s
         if (size < (int)(sizeof(NetHeader) + sizeof(ArenaPickCmd))) return;
         ArenaPickCmd *cmd = (ArenaPickCmd *)(buffer + sizeof(NetHeader));
         if (cmd->hero_id > ARENA_HERO_FROG) return; // reject anything outside the real roster
+        if (!hero_picked[client_id]) picked_count++;
         hero_pick[client_id] = cmd->hero_id;
         hero_picked[client_id] = 1;
-        printf("CLIENT %d picked hero_id=%d\n", client_id, cmd->hero_id);
-        if (hero_picked[0] && hero_picked[1]) {
-            arena_init_with_heroes((ArenaHeroID)hero_pick[0], (ArenaHeroID)hero_pick[1]);
+        arena_state.heroes[client_id].hero_id = (ArenaHeroID)cmd->hero_id;
+        printf("CLIENT %d picked hero_id=%d (%d/%d picked)\n", client_id, cmd->hero_id, picked_count, lobby_size);
+        if (picked_count == lobby_size) {
+            if (lobby_size == 2) {
+                /* Keeps the exact proven 1v1 spawn/state shape rather than
+                   relying on arena_init_teams' spread-out team spawns. */
+                arena_init_with_heroes((ArenaHeroID)hero_pick[0], (ArenaHeroID)hero_pick[1]);
+            }
+            /* Team mode: hero_id was already applied per-slot above as each
+               pick arrived; arena_init_teams' spawn positions/HP/team
+               assignment stand as-is. */
             match_phase = ARENA_PHASE_LIVE;
-            printf("Both heroes picked -- match live.\n");
+            printf("All %d heroes picked -- match live.\n", lobby_size);
         }
         return;
     }
@@ -372,14 +408,21 @@ int main(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             port = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--lobby-size") == 0 && i + 1 < argc) {
+            lobby_size = atoi(argv[++i]);
+            if (lobby_size < 2) lobby_size = 2;
+            if (lobby_size > ARENA_MAX_HEROES) lobby_size = ARENA_MAX_HEROES;
         }
     }
     load_ticket_secret();
     load_iduna_agent_config();
     server_net_init(port);
     match_log_open(port);
-    arena_init();
-    arena_bot_enabled = 1; // until/unless a second real client connects
+    /* Nothing is simulated yet -- arena_init()/arena_init_teams() runs once
+       the lobby fills (server_handle_packet), not here, so the match clock
+       genuinely can't start before real players are present (found live,
+       2026-07-24, the earlier "sim starts too early" bug). */
+    arena_bot_enabled = (lobby_size == 2); /* team mode never uses the local-practice bot fallback */
 
     int running = 1;
     int last_winner_logged = 0;
@@ -393,16 +436,9 @@ int main(int argc, char *argv[]) {
             server_handle_packet(&sender, buffer, len);
             len = recvfrom(sock, buffer, 1024, 0, (struct sockaddr *)&sender, &slen);
         }
-        /* Don't run the sim clock until both real players have joined AND
-         * both picked a hero -- found live, 2026-07-24: with only one real
-         * connection, the default arena_bot_enabled=1 (correct for local
-         * solo-vs-bot practice) meant the bot started fighting an empty
-         * second slot immediately, and the match could fully resolve before
-         * a second real player ever got the chance to connect. Real PvP
-         * means the clock starts once both sides are present and drafted,
-         * not before. */
         if (match_phase == ARENA_PHASE_LIVE) {
-            arena_update(16);
+            if (lobby_size == 2) arena_update(16);
+            else arena_update_teams(16);
             snapshot_log_timer_ms += 16;
             if (snapshot_log_timer_ms >= 500) {
                 snapshot_log_timer_ms = 0;

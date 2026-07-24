@@ -249,8 +249,10 @@ static void net_send_cast(int slot) {
     sendto(net_sock, buf, sizeof(buf), 0, (struct sockaddr *)&net_server_addr, sizeof(net_server_addr));
 }
 
+static int net_lobby_size = 2; /* set from the server's own msg->count once a snapshot arrives */
+
 static void net_poll_snapshots(void) {
-    char rbuf[512];
+    char rbuf[2048];
     struct sockaddr_in sender;
     socklen_t slen = sizeof(sender);
     int len = recvfrom(net_sock, rbuf, sizeof(rbuf), 0, (struct sockaddr *)&sender, &slen);
@@ -259,13 +261,16 @@ static void net_poll_snapshots(void) {
             NetHeader *h = (NetHeader *)rbuf;
             if (h->type == PACKET_ARENA_SNAPSHOT) {
                 ArenaSnapshotMsg *msg = (ArenaSnapshotMsg *)(rbuf + sizeof(NetHeader));
-                for (int i = 0; i < 2; i++) {
+                net_lobby_size = msg->count;
+                for (int i = 0; i < msg->count && i < ARENA_SNAPSHOT_MAX_HEROES; i++) {
                     ArenaHero *dst = &arena_state.heroes[i];
                     dst->x = msg->heroes[i].x;
                     dst->z = msg->heroes[i].z;
                     dst->hp = msg->heroes[i].hp;
                     dst->max_hp = msg->heroes[i].max_hp;
                     dst->alive = msg->heroes[i].alive;
+                    dst->active = 1;
+                    dst->team = (i < msg->count / 2) ? 0 : 1;
                     dst->hero_id = (ArenaHeroID)msg->heroes[i].hero_id;
                 }
                 arena_state.winner = msg->winner;
@@ -900,8 +905,10 @@ int main(int argc, char *argv[]) {
             draw_mesh(&cube_mesh);
         }
 
-        /* heroes */
-        for (int i = 0; i < 2; i++) {
+        /* heroes -- ARENA_MAX_HEROES so team-mode matches (up to 10v10)
+           render every real hero; local/1v1 heroes[2..] are simply never
+           alive, so this loop is a no-op regression risk for that mode. */
+        for (int i = 0; i < ARENA_MAX_HEROES; i++) {
             ArenaHero *h = &arena_state.heroes[i];
             if (!h->alive) continue;
             Mat4 t = mat4_translate(h->x, 0.5f, h->z);
@@ -910,8 +917,13 @@ int main(int argc, char *argv[]) {
             Mat4 mvp = mat4_multiply(&vp, &model);
             glUniformMatrix4fv_(loc_mvp, 1, GL_FALSE, mvp.m);
             glUniformMatrix4fv_(loc_model, 1, GL_FALSE, model.m);
-            if (i == my_owner) glUniform4f_(loc_color, 0.1f, 0.8f, 0.95f, 1.0f);
-            else glUniform4f_(loc_color, 0.95f, 0.25f, 0.15f, 1.0f);
+            if (i == my_owner) {
+                glUniform4f_(loc_color, 0.1f, 0.8f, 0.95f, 1.0f); /* my hero: bright cyan */
+            } else if (h->team == arena_state.heroes[my_owner].team) {
+                glUniform4f_(loc_color, 0.15f, 0.35f, 0.95f, 1.0f); /* teammate: blue */
+            } else {
+                glUniform4f_(loc_color, 0.95f, 0.25f, 0.15f, 1.0f); /* enemy: red */
+            }
             draw_mesh(&cube_mesh);
         }
 

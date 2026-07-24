@@ -115,17 +115,27 @@ typedef struct {
     uint8_t hero_id;
 } ArenaHeroSnapshot;
 
-// PACKET_ARENA_SNAPSHOT payload: both hero slots, in owner order (0, 1),
-// plus the match phase and each side's draft-pick status (2026-07-24: draft
-// phase added so players choose a hero instead of it being hardcoded
-// Unicorn-vs-Duck). During ARENA_PHASE_WAITING/DRAFT, heroes[] content is
-// not meaningful yet -- clients should render a lobby/draft UI instead,
-// driven by `phase` and `picked[]`.
+// ARENA_SNAPSHOT_MAX_HEROES must match packages/simulation/arena_game.h's
+// ARENA_MAX_HEROES (ARENA_TEAM_SIZE*2 = 20) -- duplicated here rather than
+// included, since protocol.h is a lower-level shared header that doesn't
+// otherwise depend on the sim package.
+#define ARENA_SNAPSHOT_MAX_HEROES 20
+
+// PACKET_ARENA_SNAPSHOT payload: up to ARENA_SNAPSHOT_MAX_HEROES hero
+// slots, in owner order -- `count` says how many are actually meaningful
+// (2 for a 1v1 match, up to 20 for a full 10v10 lobby), same "count +
+// fixed-size array" convention as NetEntity/entity_count elsewhere in this
+// protocol. Plus the match phase and each side's draft-pick status
+// (2026-07-24: draft phase added so players choose a hero instead of it
+// being hardcoded Unicorn-vs-Duck). During ARENA_PHASE_WAITING/DRAFT,
+// heroes[] content is not meaningful yet -- clients should render a
+// lobby/draft UI instead, driven by `phase` and `picked[]`.
 typedef struct {
-    ArenaHeroSnapshot heroes[2];
-    uint8_t winner; /* 0 = none yet, 1 = owner 0 won, 2 = owner 1 won */
+    uint8_t count;
+    ArenaHeroSnapshot heroes[ARENA_SNAPSHOT_MAX_HEROES];
+    uint8_t winner; /* 0 = none yet, 1 = team/owner 0 won, 2 = team/owner 1 won */
     uint8_t phase;  /* ARENA_PHASE_WAITING/DRAFT/LIVE */
-    uint8_t picked[2]; /* 1 once that owner has locked in a hero this draft */
+    uint8_t picked[ARENA_SNAPSHOT_MAX_HEROES]; /* 1 once that slot has locked in a hero this draft */
 } ArenaSnapshotMsg;
 
 #endif
