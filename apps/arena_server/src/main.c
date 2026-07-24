@@ -427,6 +427,34 @@ int main(int argc, char *argv[]) {
     int running = 1;
     int last_winner_logged = 0;
     unsigned int snapshot_log_timer_ms = 0;
+    /* Shutdown countdown once the match ends -- found live, 2026-07-24: this
+       process used to just loop forever after match_end, still broadcasting
+       PACKET_ARENA_SNAPSHOT every 16ms to clients that had long since moved
+       on to their next match. For a persistent bot (one UDP socket reused
+       across many matches, never explicitly disconnected -- there's no
+       PACKET_DISCONNECT in this protocol), every prior match server it ever
+       played on kept blasting stale packets at its socket forever, and that
+       pileup was silently swallowing the real PACKET_WELCOME/PACKET_MATCH_FOUND
+       for its *next* match, causing intermittent "failed to connect" -- not
+       a client bug, a server-lifecycle bug. A few final broadcasts (so
+       clients definitely see the winner) and then a real exit fixes both
+       this and the unbounded zombie-process buildup from a long-running
+       persistent bot pool. */
+    int shutdown_ticks = -1;
+    /* Connection timeout, separate from the match-end shutdown above --
+       found live, 2026-07-24: a lobby that never fills (a stale/duplicate
+       PACKET_FIND_MATCH retry racing the matchmaker's reply can spawn a
+       server that no real client ever connects to -- see arena_bot's
+       wait_for_match doc comment) sits in ARENA_PHASE_WAITING/DRAFT
+       forever, and the match-end shutdown timer above only ever engages
+       once `arena_state.winner != 0` -- a phantom match never reaches that,
+       so it never engages either. Confirmed live: 8 of 9 spawned match
+       servers in one soak-test run were exactly this (one match_start line
+       and nothing else, still running unbounded). This is the defensive
+       complement: no real connection progress within a reasonable window
+       means give up and exit, regardless of whether the root-cause race
+       above is ever fully closed. */
+    unsigned int waiting_ticks_ms = 0;
     while (running) {
         char buffer[1024];
         struct sockaddr_in sender;
@@ -448,9 +476,24 @@ int main(int argc, char *argv[]) {
                 match_log_win(arena_state.winner);
                 report_match_result(arena_state.winner);
                 last_winner_logged = 1;
+                shutdown_ticks = 0;
+            }
+        } else {
+            waiting_ticks_ms += 16;
+            if (waiting_ticks_ms > 60000) { /* 60s with no real progress -- give up, not a leak */
+                printf("No lobby progress in 60s (phase=%d, %d/%d connected) -- shutting down.\n",
+                       match_phase, client_count, lobby_size);
+                running = 0;
             }
         }
         server_broadcast();
+        if (shutdown_ticks >= 0) {
+            shutdown_ticks++;
+            if (shutdown_ticks > 60) { /* ~1s of final broadcasts at 16ms/tick, then exit for real */
+                printf("Match over, shutting down.\n");
+                running = 0;
+            }
+        }
         #ifdef _WIN32
         Sleep(16);
         #else

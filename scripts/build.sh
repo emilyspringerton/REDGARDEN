@@ -30,9 +30,16 @@ gcc "${COMMON_FLAGS[@]}" \
   "${ROOT_DIR}/apps/matchmaker/src/main.c"
 
 # NORTHSTAR §13 (2026-07-24 pivot): apps/arena is the product now -- this is
-# its server-authoritative UDP counterpart (1v1 real networked PvP).
+# its server-authoritative UDP counterpart (1v1 and N-player team-mode PvP).
 gcc "${COMMON_FLAGS[@]}" \
   -o "${BUILD_DIR}/red_garden_arena_server" \
   "${ROOT_DIR}/apps/arena_server/src/main.c" \
   "${ROOT_DIR}/packages/simulation/arena_game.c" \
+  -lm
+
+# A real networked MOBA bot (not the sim's internal practice-mode brain) --
+# the "22 bots in the pool" requirement.
+gcc "${COMMON_FLAGS[@]}" \
+  -o "${BUILD_DIR}/red_garden_arena_bot" \
+  "${ROOT_DIR}/apps/arena_bot/src/main.c" \
   -lm

@@ -646,3 +646,77 @@ results reporting to WOTAN reuses `report_match_result`'s exact shape but posts 
 `"game":"redgarden-arena"` rather than `"redgarden"`, correctly keeping card-RTS and MOBA stats
 separate on the same genre-agnostic `player_game_stats` table. Matchmaking (vs. direct `--connect`)
 for the MOBA, 10v10, and everything else in §13's original deferred list stays deferred.
+
+**Update, same day — "22 bots in the pool," a real persistent bot pool via real matchmaking.**
+Founder, direct: "10 v 10 22 bots in the pool" → "i did not ask you to wait for human validation
+we have a deadline keep building" → "the human will join the bot games to validate for now bot
+first feedback loop." Read plainly: bots keep the world populated and playing continuously; a human
+drops in to validate, rather than 1v1-human-PvP being a hard gate before any scaling work starts.
+
+Shipped, in order:
+- **Team-mode sim** (`packages/simulation/arena_game.c`/`.h`): `ArenaHero` gains `team`/`active`;
+  `heroes[2]` grows to `heroes[ARENA_MAX_HEROES]` (20, `ARENA_TEAM_SIZE`=10 per side).
+  `arena_nearest_enemy()` generalizes what used to be a hardcoded "the other slot" foe lookup —
+  `arena_cast_q`/`toggle_w`/`arena_cast_r` now use it (with NULL-safety added for "no living enemy
+  right now"), verified to produce byte-identical behavior for the existing 1v1 path via the full
+  pre-existing test suite (zero regressions). New `arena_init_teams()`/`arena_update_teams()` are
+  additive — the 1v1 local demo's own functions are untouched. 5 new headless tests cover team
+  init, nearest-enemy targeting (including multiple attackers converging on one target — a real
+  team-fight case the old pairwise combat never had to express), and team-wipe win condition.
+- **Draft phase**: heroes were hardcoded (Unicorn vs Duck); new `PACKET_ARENA_PICK` +
+  `ARENA_PHASE_WAITING/DRAFT/LIVE` — the match clock only starts once every real slot has both
+  connected *and* picked a hero.
+- **`apps/arena_server` generalized** to `--lobby-size N` (default 2 — the original 1v1 path is
+  byte-for-byte unchanged behavior). `ArenaSnapshotMsg` gained a `count` field (same
+  "count + fixed array" convention as `NetEntity`/`entity_count`) so the wire format scales from 2
+  to `ARENA_SNAPSHOT_MAX_HEROES` (20) without a second message type.
+- **`apps/arena_bot`** (new binary): a real networked bot — not the sim's internal hand-authored
+  practice AI, which is explicitly disabled the moment any real client connects. Gets a real WOTAN
+  identity (register+ticket-mint, ported from `apps/client/bot_main.c`'s pattern), queues via a
+  matchmaker, drafts a hero, plays using only the snapshot data any client sees (no access to the
+  authoritative `ArenaState`), and loops back to the matchmaker after the match ends — genuinely
+  persistent, not a one-shot script.
+- **`apps/matchmaker` generalized**: `--lobby-size`/`--listen-port`/`--first-game-port` flags, one
+  binary now serves both the original card-RTS pairing role and an arena N-player lobby role
+  (`--server-bin ./build/red_garden_arena_server`), passing `--lobby-size` through to the spawned
+  server.
+
+**Three real bugs found and fixed by actually running a persistent bot pool, not by review:**
+1. A "persistent" bot was re-registering a **brand-new WOTAN identity every single match**
+   (`provider_sub` keyed off `time(NULL)`, called on every reconnect) instead of keeping one stable
+   identity — confirmed live via `player_game_stats` showing dozens of one-match player rows
+   instead of a growing record. Fixed by registering once per process lifetime and only re-minting
+   the ticket (which is meant to be short-lived) on each reconnect.
+2. **Match servers never terminated after the match ended** — they kept broadcasting
+   `PACKET_ARENA_SNAPSHOT` forever to clients that had long since moved on to their next match.
+   For a persistent bot (one UDP socket reused across many matches, no `PACKET_DISCONNECT` in this
+   protocol), every prior match server it ever played kept blasting stale packets at its socket,
+   and that pileup was silently swallowing the real `PACKET_WELCOME` for its *next* connection —
+   not a client bug, a server-lifecycle bug, seen live as intermittent "failed to connect."
+   Fixed: the server now does a few final broadcasts after the winner is set, then exits for real.
+3. **A UDP retry race in the matchmaker protocol**: the bot's `PACKET_FIND_MATCH` retry (originally
+   every ~1s) could arrive at the matchmaker just after it had already paired and dequeued that
+   client, silently re-enqueuing a phantom entry nobody would ever come back to claim — later
+   falsely paired with a genuinely new client, spawning a match only one side ever connects to.
+   Found live: spawned match-log files with a `match_start` and nothing else, ever, despite zero
+   logged connect failures on either bot. Mitigated (not fully eliminated — this is a same-box
+   UDP protocol with no idempotency/ack, a deeper fix is a real follow-up, flagged not silently
+   left) by slowing the retry interval to ~5s, far outside a same-box matchmaker's normal
+   millisecond reply time. **Defensive complement, since the race isn't fully closed:** the server
+   now also self-terminates if a lobby makes no real progress (never reaches `ARENA_PHASE_LIVE`)
+   within 60s, so any phantom that still slips through cleans itself up instead of leaking forever.
+
+**Verified live, extensively — a real soak test, not a single match:** two persistent
+`apps/arena_bot` processes, real WOTAN identities, playing through a real arena matchmaker
+(`--lobby-size 2`) continuously. Confirmed: identity stays stable at exactly 1 registration per bot
+across 20+ matches each; win/loss records accumulate correctly (`player_game_stats` showing bots
+with 23 matches played, real accumulated W/L); zero connect failures after the retry-interval fix;
+phantom match servers (when they do occur) self-terminate within roughly 60-100s instead of leaking
+forever (confirmed by watching one exit in real time, not just inferring it).
+
+**Explicitly still unverified, honestly flagged:** the actual 10v10 (`--lobby-size 20`) path has the
+same code as the verified 1v1 path (`arena_update_teams`, `arena_init_teams`, team assignment,
+`arena_nearest_enemy` all headless-tested) but has not itself been run live end-to-end with 20 real
+bot connections — that's the direct next verification step, not assumed passing by extension. The
+human-facing SDL2 client's rendering of a live networked match (team-colored heroes, HUD) has not
+been visually confirmed on this box (no Xvfb, the same standing constraint as the local demo).
