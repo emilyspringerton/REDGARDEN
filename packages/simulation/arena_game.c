@@ -199,6 +199,10 @@ float arena_hero_armor(const ArenaHero *h) {
             }
         }
     }
+    /* Loki's Bound Where the Myth Says (W, S170-79): flat armor while toggled on. */
+    if (h->hero_id == ARENA_HERO_LOKI && h->w_active) {
+        return (float)ARENA_LOKI_W_ARMOR_BONUS;
+    }
     return 0.0f;
 }
 
@@ -926,6 +930,33 @@ static int courier_cast_r(ArenaHero *courier, ArenaHero *foe) {
     return 1;
 }
 
+/* loki_cast_q: Interference, Not a Signal -- an instant positional swap with
+ * the nearest enemy, no travel time (unlike every dash-shaped Q in this
+ * file). Loki simply arrives where the enemy was and the enemy where he
+ * was, then a small hit lands on arrival if the swap put them in range of
+ * each other anyway. Returns 1 if there was a living enemy to swap with. */
+static int loki_cast_q(ArenaHero *loki, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return 0;
+    float ox = loki->x, oz = loki->z;
+    loki->x = foe->x;
+    loki->z = foe->z;
+    foe->x = ox;
+    foe->z = oz;
+    loki->moving = 0;
+    float fdx = foe->x - loki->x, fdz = foe->z - loki->z;
+    if (sqrtf(fdx * fdx + fdz * fdz) <= ARENA_LOKI_Q_HIT_RADIUS) {
+        apply_damage(foe, apply_armor(ARENA_LOKI_Q_DAMAGE, arena_hero_armor(foe)));
+    }
+    return 1;
+}
+
+/* loki_cast_r: Held For As Long As The Myth Demands -- self-cast survive
+ * floor, same mechanic Pizza/Dagda already use (S170-46), reused here as
+ * Sigyn's endurance rather than either of their reasons for it. */
+static void loki_cast_r(ArenaHero *loki) {
+    loki->survive_floor_ms = ARENA_LOKI_R_FLOOR_MS;
+}
+
 void arena_cast_q(int owner) {
     if (owner < 0 || owner >= ARENA_MAX_HEROES) return;
     ArenaHero *h = &arena_state.heroes[owner];
@@ -990,6 +1021,11 @@ void arena_cast_q(int owner) {
     case ARENA_HERO_COURIER:
         if (courier_cast_q(h, foe)) {
             h->q_cooldown_ms = cast_cooldown(h, ARENA_COURIER_Q_COOLDOWN_MS);
+        }
+        break;
+    case ARENA_HERO_LOKI:
+        if (loki_cast_q(h, foe)) {
+            h->q_cooldown_ms = cast_cooldown(h, ARENA_LOKI_Q_COOLDOWN_MS);
         }
         break;
     }
@@ -1070,6 +1106,12 @@ void arena_toggle_w(int owner) {
         if (h->w_cooldown_ms > 0) return;
         courier_toggle_w(h);
         h->w_cooldown_ms = cast_cooldown(h, ARENA_COURIER_W_COOLDOWN_MS);
+        break;
+    case ARENA_HERO_LOKI:
+        /* Bound Where the Myth Says: free toggle, no cooldown, same
+           convention as Unicorn's W -- arena_hero_armor() reads w_active
+           directly for the actual bonus. */
+        h->w_active = !h->w_active;
         break;
     default:
         /* No-op for any hero without a real W in this arena, not a crash
@@ -1203,6 +1245,10 @@ void arena_cast_r(int owner) {
         if (courier_cast_r(h, foe)) {
             h->r_cooldown_ms = cast_cooldown(h, ARENA_COURIER_R_COOLDOWN_MS);
         }
+        break;
+    case ARENA_HERO_LOKI:
+        loki_cast_r(h);
+        h->r_cooldown_ms = cast_cooldown(h, ARENA_LOKI_R_COOLDOWN_MS);
         break;
     }
 }
@@ -1488,6 +1534,19 @@ static void bot_cast_kit_if_ready(ArenaHero *bot, ArenaHero *foe) {
             arena_cast_q(bot->owner); /* dash-strike, closes distance on its own like Morrigan's W */
         } else if (bot->r_cooldown_ms <= 0 && dist <= ARENA_COURIER_R_RANGE) {
             arena_cast_r(bot->owner);
+        }
+        break;
+    case ARENA_HERO_LOKI:
+        /* Q has no range gate (it's a swap, not a dash) so it's always
+           usable off cooldown. W is a defensive stance -- toggle on under
+           pressure, like Frog's heuristic. R is the survive-floor panic
+           button, same threshold as Pizza/Dagda's. */
+        if (bot->hp < bot->max_hp / 4 && bot->r_cooldown_ms <= 0) {
+            arena_cast_r(bot->owner);
+        } else if (bot->q_cooldown_ms <= 0) {
+            arena_cast_q(bot->owner);
+        } else if (!bot->w_active && bot->hp < bot->max_hp / 2) {
+            arena_toggle_w(bot->owner);
         }
         break;
     }

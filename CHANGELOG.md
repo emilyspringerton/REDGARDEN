@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-07-24 (32)
+
+- feat(arena): 12th hero, Loki (S170-79). Founder: "add LOKI to KNIGHTS_OF_THE_VOID hero
+  multiverse then into the game one shot as a kit." New lore entry first
+  (`TYLER/multiverse_heroes.md` #37, "Loki, Who Isn't Here" — see that repo's own commit), then a
+  real `ARENA_HERO_LOKI` kit here, one pass, no stub: Q "Interference, Not a Signal" (instant
+  positional swap with the nearest enemy, no travel time, small hit on arrival, no range gate),
+  W "Bound Where the Myth Says" (free toggle, flat armor bonus while active, same convention as
+  Unicorn's regen toggle), R "Held For As Long As The Myth Demands" (self-cast survive-floor
+  window, the same `survive_floor_ms` mechanic Pizza/Dagda's ultimates already use). Wired into
+  every real call site: `arena_hero_armor()`, the Q/W/R dispatch switches, the bot AI heuristic,
+  the human/bot auto-draft pools (`% 11` → `% 12`), the server's draft-pick validation bound
+  (`ARENA_HERO_COURIER` → `ARENA_HERO_LOKI`), `arena_hero_name()`, `docs/HEROES_VS0.md`.
+  `ARENA_HERO_COUNT` 11 → 12. Verified: `scripts/build.sh`, `scripts/build_arena.sh`,
+  `scripts/test_arena.sh`, `scripts/test_10_bots.sh` all clean, plus a full local mingw
+  cross-compile with the updated roster, 0 warnings.
+
 ## 2026-07-24 (31)
 
 - feat(arena): toggleable APM overlay, F11 (S170-71). Founder: "add toggalable apm overlay f11"

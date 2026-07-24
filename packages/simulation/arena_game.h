@@ -78,8 +78,9 @@ typedef enum {
     ARENA_HERO_MORRIGAN = 8,
     ARENA_HERO_DAGDA = 9,
     ARENA_HERO_COURIER = 10, /* Ratatoskr, TYLER multiverse_heroes.md #32 */
+    ARENA_HERO_LOKI = 11, /* TYLER multiverse_heroes.md #37, "Loki, Who Isn't Here" (S170-79) */
 } ArenaHeroID;
-#define ARENA_HERO_COUNT 11
+#define ARENA_HERO_COUNT 12
 
 /* The Unicorn — first real hero kit wired in (S170-18). */
 #define ARENA_UNICORN_ARMOR         4    /* passive: Chassis Claim, flat dmg reduction */
@@ -353,6 +354,24 @@ typedef enum {
 #define ARENA_COURIER_R_RANGE       6.0f
 #define ARENA_COURIER_R_DRAIN       18
 #define ARENA_COURIER_R_COOLDOWN_MS 20000
+
+/* Loki, Who Isn't Here (S170-79, TYLER multiverse_heroes.md #37) -- a hero
+ * defined by absence, so his kit works through repositioning and endurance
+ * rather than a straightforward stat-check. Q is an instant swap with the
+ * nearest enemy (no travel time, no dash arc -- he's just suddenly where the
+ * enemy was, which is what "present only as interference on adjacent
+ * readings" means mechanically) plus a small hit on arrival. W is a toggled
+ * flat armor bonus ("bound where the myth says," a defensive stance, not
+ * regen -- distinct from Unicorn's toggle). R borrows the same
+ * survive_floor_ms mechanic Pizza/Dagda already use, cast on himself: "the
+ * bowl does not need to be believed to be held" (Sigyn, #34) -- someone else
+ * holding the outcome open for him for a fixed window, same as the myth. */
+#define ARENA_LOKI_Q_DAMAGE         10
+#define ARENA_LOKI_Q_HIT_RADIUS     2.0f
+#define ARENA_LOKI_Q_COOLDOWN_MS    5000
+#define ARENA_LOKI_W_ARMOR_BONUS    5 /* free toggle, no cooldown -- same convention as Unicorn's W */
+#define ARENA_LOKI_R_FLOOR_MS       3500
+#define ARENA_LOKI_R_COOLDOWN_MS    24000
 
 typedef struct {
     float x, z;

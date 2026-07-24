@@ -289,6 +289,26 @@ between two points and taking a cut off whatever passes through.
 
 ---
 
+### Loki (TYLER `multiverse_heroes.md` #37, "Loki, Who Isn't Here") — **Trickster/Bruiser** (S170-79)
+
+The one figure in his own myth the compendium left out of the document — every other account of
+him arrives secondhand, through Sigyn (#34) holding the venom-bowl "for as long as the myth
+demands, and then kept holding it." His whole kit works the same way: not a straightforward
+stat-check like most of the roster, but repositioning and endurance, presence registered only as
+interference on someone else's reading rather than a signal of his own.
+
+- **Q — Interference, Not a Signal**: an instant positional swap with the nearest enemy — no
+  travel time, no dash arc, unlike every other dash-shaped Q in this roster. He's simply, suddenly,
+  where the enemy was; a small hit lands on arrival if the swap puts them in range of each other.
+  No range limit — the trade-off is a real cooldown, not a whiff condition.
+- **W — Bound Where the Myth Says**: a free toggle (no cooldown, same convention as Unicorn's
+  regen), granting a flat armor bonus while active — a defensive stance, not sustain.
+- **R — Held For As Long As The Myth Demands**: self-cast survive-floor window (same
+  `survive_floor_ms` mechanic Pizza and Dagda's ultimates already use) — HP can't drop below 1 for
+  the duration. Someone else holds the outcome open for him, the way the bowl does in the myth.
+
+---
+
 ## Starting Item Roster (VS0)
 
 LoL Season 3 is the explicit stylistic northstar here — not its item *names*, its item *stat-line
