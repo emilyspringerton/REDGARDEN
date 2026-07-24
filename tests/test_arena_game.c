@@ -450,6 +450,79 @@ static void test_arena_bot_enabled_gates_kit_casts_too(void) {
     arena_bot_enabled = 1; /* restore the default for any test run after this one */
 }
 
+/* ---- Team mode (10v10), 2026-07-24, NORTHSTAR §13 cont'd ---- */
+
+static void test_arena_init_teams_sets_up_both_sides(void) {
+    arena_init_teams();
+    int team0 = 0, team1 = 0;
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+        CHECK(arena_state.heroes[i].active, "every one of the 20 slots is active in team mode");
+        CHECK(arena_state.heroes[i].alive, "every slot starts alive");
+        if (arena_state.heroes[i].team == 0) team0++; else team1++;
+    }
+    CHECK(team0 == ARENA_TEAM_SIZE && team1 == ARENA_TEAM_SIZE,
+          "exactly ARENA_TEAM_SIZE heroes on each team");
+}
+
+static void test_nearest_enemy_finds_closest_on_other_team(void) {
+    arena_init_teams();
+    /* Owner 0 (team 0) -- put two team-1 heroes at different distances. */
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = 5; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;     /* far */
+    arena_state.heroes[ARENA_TEAM_SIZE + 1].x = 1; arena_state.heroes[ARENA_TEAM_SIZE + 1].z = 0; /* near */
+
+    ArenaHero *nearest = arena_nearest_enemy(0);
+    CHECK(nearest == &arena_state.heroes[ARENA_TEAM_SIZE + 1],
+          "arena_nearest_enemy picks the closer of two enemies on the other team");
+}
+
+static void test_nearest_enemy_ignores_teammates_and_dead_heroes(void) {
+    arena_init_teams();
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    /* A teammate right next to owner 0 should never be picked. */
+    arena_state.heroes[1].x = 0.1f; arena_state.heroes[1].z = 0;
+    /* The nearest enemy is dead -- should be skipped in favor of a living one further out. */
+    arena_state.heroes[ARENA_TEAM_SIZE].x = 0.5f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE + 1].x = 3.0f; arena_state.heroes[ARENA_TEAM_SIZE + 1].z = 0;
+
+    ArenaHero *nearest = arena_nearest_enemy(0);
+    CHECK(nearest == &arena_state.heroes[ARENA_TEAM_SIZE + 1],
+          "arena_nearest_enemy skips teammates entirely and dead heroes on the enemy team");
+}
+
+static void test_team_melee_converges_multiple_attackers_on_one_target(void) {
+    arena_init_teams();
+    /* Deactivate everyone except: owner 0 + owner 1 (team 0), and one lone
+       team-1 hero within melee range of both -- a real "two attackers, one
+       target" team-fight case the old 1v1 pairwise resolve_combat never had
+       to express. */
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].x = 1.0f; arena_state.heroes[1].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = 0.5f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 100;
+
+    arena_update_teams(16);
+
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].hp < 100,
+          "the lone enemy hero takes damage from being in melee range of two attackers at once");
+}
+
+static void test_team_wipe_win_condition(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    /* Only owner 0 (team 0) is left active and alive -- team 1 is wiped. */
+    arena_state.heroes[1].active = 0;
+
+    arena_update_teams(16);
+
+    CHECK(arena_state.winner == 1, "team 0 wins once team 1 has zero active-and-alive heroes left");
+}
+
 int main(void) {
     printf("RED GARDEN arena_game headless smoke test\n\n");
     test_movement_reaches_target();
@@ -480,6 +553,11 @@ int main(void) {
     test_frog_r_vanishes();
     test_frog_has_no_w();
     test_arena_bot_enabled_gates_kit_casts_too();
+    test_arena_init_teams_sets_up_both_sides();
+    test_nearest_enemy_finds_closest_on_other_team();
+    test_nearest_enemy_ignores_teammates_and_dead_heroes();
+    test_team_melee_converges_multiple_attackers_on_one_target();
+    test_team_wipe_win_condition();
     printf("\n%s\n", failures == 0 ? "ALL PASS" : "SOME FAILED");
     return failures == 0 ? 0 : 1;
 }

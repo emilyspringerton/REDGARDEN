@@ -8,6 +8,14 @@
 #define ARENA_ATTACK_COOLDOWN_MS 700
 #define ARENA_NODE_COUNT 2
 
+/* Team-scale arena (2026-07-24, NORTHSTAR §13 cont'd): the array grows from
+ * 2 to ARENA_MAX_HEROES so a full 10v10 match fits in the same ArenaState
+ * the 1v1 local demo and apps/arena_server (1v1) already use. The 1v1 path
+ * (arena_init/arena_init_with_heroes) still only ever populates heroes[0]/
+ * [1] and leaves the rest zeroed/inactive -- see the `active` field below. */
+#define ARENA_TEAM_SIZE 10
+#define ARENA_MAX_HEROES (ARENA_TEAM_SIZE * 2)
+
 /* Hero roster (docs/HEROES_VS0.md), NORTHSTAR §12 Phase D. hero_id
  * generalizes kit dispatch away from S170-18's "owner 0 == The Unicorn"
  * hardcoding -- either owner slot can carry either hero now. Growing this
@@ -84,8 +92,10 @@ typedef struct {
     int hp;
     int max_hp;
     int attack_cooldown_ms;
-    int owner; /* 0 = player, 1 = bot */
+    int owner; /* 0 = player, 1 = bot in the 1v1 local demo; a slot index 0..ARENA_MAX_HEROES-1 in team mode */
     int alive;
+    int team;   /* 2026-07-24: which side, for team-mode nearest-enemy targeting. 1v1 local demo sets 0/1 explicitly. */
+    int active; /* 2026-07-24: was this slot ever populated by arena_init_with_heroes/arena_init_teams? Distinct from `alive` (which also goes 0 on death) -- lets a generalized loop over ARENA_MAX_HEROES skip never-used padding slots in 1v1 mode without mistaking them for "already dead" participants. */
     ArenaHeroID hero_id;
     /* Generic ability state, shared field names across kits (Unicorn's
      * Q/W/R and Duck's Q/R both use these) rather than one struct per hero
@@ -122,9 +132,9 @@ typedef struct {
 } ArenaNode;
 
 typedef struct {
-    ArenaHero heroes[2];
+    ArenaHero heroes[ARENA_MAX_HEROES];
     ArenaNode nodes[ARENA_NODE_COUNT];
-    int winner; /* 0 = none yet, 1 = player, 2 = bot */
+    int winner; /* 0 = none yet, 1 = player/team 0, 2 = bot/team 1 */
 } ArenaState;
 
 extern ArenaState arena_state;
@@ -146,6 +156,18 @@ void arena_init_with_heroes(ArenaHeroID player_hero, ArenaHeroID bot_hero);
 void arena_update(unsigned int dt_ms);
 void arena_set_move_target(int owner, float x, float z);
 void arena_bot_tick(unsigned int dt_ms);
+
+/* Team-mode entry points (2026-07-24, NORTHSTAR §13 cont'd): a real N-vs-N
+ * match (up to ARENA_TEAM_SIZE per side). arena_init_teams sets up
+ * ARENA_MAX_HEROES slots (team 0 = owners 0..ARENA_TEAM_SIZE-1, team 1 =
+ * the rest), all defaulting to ARENA_HERO_UNICORN until each slot's real
+ * client sends its own draft pick (apps/arena_server owns that protocol,
+ * not this sim layer). arena_update_teams drives all active heroes each
+ * tick via nearest-enemy targeting -- no internal bot AI involved (every
+ * slot in team mode is filled by a real network client, human or bot). */
+void arena_init_teams(void);
+void arena_update_teams(unsigned int dt_ms);
+ArenaHero *arena_nearest_enemy(int owner);
 
 /* Kit casts dispatch on the hero's hero_id, not a hardcoded owner check
  * (S170-31 generalized this from S170-18's Unicorn-only version). No-ops

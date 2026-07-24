@@ -48,6 +48,12 @@ static int client_active[ARENA_MAX_CLIENTS];
 static unsigned char client_player_id[ARENA_MAX_CLIENTS][16];
 static int client_has_player_id[ARENA_MAX_CLIENTS];
 
+/* Draft phase (2026-07-24): heroes used to be hardcoded (Unicorn vs Duck) --
+ * now both real players pick before the match clock starts. */
+static int match_phase = ARENA_PHASE_WAITING;
+static int hero_picked[ARENA_MAX_CLIENTS];
+static int hero_pick[ARENA_MAX_CLIENTS];
+
 // ---- connect-ticket verification (ported verbatim from apps/server) ----
 #define TICKET_PAYLOAD_LEN 20
 #define TICKET_MAC_LEN 16
@@ -267,6 +273,9 @@ static void server_broadcast(void) {
         msg.heroes[i].hero_id = (uint8_t)h->hero_id;
     }
     msg.winner = (uint8_t)arena_state.winner;
+    msg.phase = (uint8_t)match_phase;
+    msg.picked[0] = (uint8_t)hero_picked[0];
+    msg.picked[1] = (uint8_t)hero_picked[1];
 
     memcpy(buffer, &head, sizeof(NetHeader));
     memcpy(buffer + sizeof(NetHeader), &msg, sizeof(ArenaSnapshotMsg));
@@ -312,10 +321,12 @@ static void server_handle_packet(struct sockaddr_in *sender, char *buffer, int s
 
                 // Once the second real player connects, stop the internal
                 // hand-authored bot from driving owner 1 -- see
-                // arena_bot_enabled's doc comment in arena_game.h.
+                // arena_bot_enabled's doc comment in arena_game.h. Enter the
+                // draft instead of going straight to a live match.
                 if (client_id == 1) {
                     arena_bot_enabled = 0;
-                    printf("Second player connected -- internal bot AI disabled, real PvP now.\n");
+                    match_phase = ARENA_PHASE_DRAFT;
+                    printf("Second player connected -- internal bot AI disabled, entering draft.\n");
                 }
                 break;
             }
@@ -324,6 +335,24 @@ static void server_handle_packet(struct sockaddr_in *sender, char *buffer, int s
     }
 
     if (client_id == -1) return; // unknown sender, not a connect -- ignore
+
+    if (head->type == PACKET_ARENA_PICK) {
+        if (match_phase != ARENA_PHASE_DRAFT) return; // picks only mean anything during draft
+        if (size < (int)(sizeof(NetHeader) + sizeof(ArenaPickCmd))) return;
+        ArenaPickCmd *cmd = (ArenaPickCmd *)(buffer + sizeof(NetHeader));
+        if (cmd->hero_id > ARENA_HERO_FROG) return; // reject anything outside the real roster
+        hero_pick[client_id] = cmd->hero_id;
+        hero_picked[client_id] = 1;
+        printf("CLIENT %d picked hero_id=%d\n", client_id, cmd->hero_id);
+        if (hero_picked[0] && hero_picked[1]) {
+            arena_init_with_heroes((ArenaHeroID)hero_pick[0], (ArenaHeroID)hero_pick[1]);
+            match_phase = ARENA_PHASE_LIVE;
+            printf("Both heroes picked -- match live.\n");
+        }
+        return;
+    }
+
+    if (match_phase != ARENA_PHASE_LIVE) return; // move/cast only mean anything in a live match
 
     if (head->type == PACKET_ARENA_MOVE) {
         if (size < (int)(sizeof(NetHeader) + sizeof(ArenaMoveCmd))) return;
@@ -364,15 +393,15 @@ int main(int argc, char *argv[]) {
             server_handle_packet(&sender, buffer, len);
             len = recvfrom(sock, buffer, 1024, 0, (struct sockaddr *)&sender, &slen);
         }
-        /* Don't run the sim clock until both real players have joined --
-         * found live, 2026-07-24: with only one real connection, the
-         * default arena_bot_enabled=1 (correct for local solo-vs-bot
-         * practice) meant the bot started fighting an empty second slot
-         * immediately, and the match could fully resolve before a second
-         * real player ever got the chance to connect. Real PvP means the
-         * clock starts when both sides are actually present, not before. */
-        int both_connected = client_active[0] && client_active[1];
-        if (both_connected) {
+        /* Don't run the sim clock until both real players have joined AND
+         * both picked a hero -- found live, 2026-07-24: with only one real
+         * connection, the default arena_bot_enabled=1 (correct for local
+         * solo-vs-bot practice) meant the bot started fighting an empty
+         * second slot immediately, and the match could fully resolve before
+         * a second real player ever got the chance to connect. Real PvP
+         * means the clock starts once both sides are present and drafted,
+         * not before. */
+        if (match_phase == ARENA_PHASE_LIVE) {
             arena_update(16);
             snapshot_log_timer_ms += 16;
             if (snapshot_log_timer_ms >= 500) {

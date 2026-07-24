@@ -17,6 +17,11 @@
 #define PACKET_ARENA_MOVE 6     /* client -> arena_server: new move target (x,z) */
 #define PACKET_ARENA_CAST 7     /* client -> arena_server: cast q/w/r */
 #define PACKET_ARENA_SNAPSHOT 8 /* arena_server -> client: both heroes' state */
+#define PACKET_ARENA_PICK 9     /* client -> arena_server: hero pick during draft */
+
+#define ARENA_PHASE_WAITING 0 /* fewer than 2 real players connected yet */
+#define ARENA_PHASE_DRAFT   1 /* both connected, waiting on hero picks */
+#define ARENA_PHASE_LIVE    2 /* both picked, match clock running */
 
 typedef enum {
     CELL_NEUTRAL = 0,
@@ -91,6 +96,12 @@ typedef struct {
     uint8_t slot;
 } ArenaCastCmd;
 
+// PACKET_ARENA_PICK payload: which hero (ArenaHeroID) the sending client
+// wants to play, sent during ARENA_PHASE_DRAFT.
+typedef struct {
+    uint8_t hero_id;
+} ArenaPickCmd;
+
 // Per-hero state broadcast in PACKET_ARENA_SNAPSHOT. Deliberately minimal
 // for the first networked pass (position/HP/alive/hero_id only, no
 // ability-state sync yet) -- enough for a human to see and fight a real
@@ -104,10 +115,17 @@ typedef struct {
     uint8_t hero_id;
 } ArenaHeroSnapshot;
 
-// PACKET_ARENA_SNAPSHOT payload: both hero slots, in owner order (0, 1).
+// PACKET_ARENA_SNAPSHOT payload: both hero slots, in owner order (0, 1),
+// plus the match phase and each side's draft-pick status (2026-07-24: draft
+// phase added so players choose a hero instead of it being hardcoded
+// Unicorn-vs-Duck). During ARENA_PHASE_WAITING/DRAFT, heroes[] content is
+// not meaningful yet -- clients should render a lobby/draft UI instead,
+// driven by `phase` and `picked[]`.
 typedef struct {
     ArenaHeroSnapshot heroes[2];
     uint8_t winner; /* 0 = none yet, 1 = owner 0 won, 2 = owner 1 won */
+    uint8_t phase;  /* ARENA_PHASE_WAITING/DRAFT/LIVE */
+    uint8_t picked[2]; /* 1 once that owner has locked in a hero this draft */
 } ArenaSnapshotMsg;
 
 #endif

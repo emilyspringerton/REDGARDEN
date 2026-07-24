@@ -66,6 +66,8 @@ void arena_init_with_heroes(ArenaHeroID player_hero, ArenaHeroID bot_hero) {
     arena_state.heroes[0].hp = arena_state.heroes[0].max_hp = 100;
     arena_state.heroes[0].owner = 0;
     arena_state.heroes[0].alive = 1;
+    arena_state.heroes[0].active = 1;
+    arena_state.heroes[0].team = 0;
     arena_state.heroes[0].hero_id = player_hero;
 
     arena_state.heroes[1].x = 6.0f;
@@ -75,6 +77,8 @@ void arena_init_with_heroes(ArenaHeroID player_hero, ArenaHeroID bot_hero) {
     arena_state.heroes[1].hp = arena_state.heroes[1].max_hp = 100;
     arena_state.heroes[1].owner = 1;
     arena_state.heroes[1].alive = 1;
+    arena_state.heroes[1].active = 1;
+    arena_state.heroes[1].team = 1;
     arena_state.heroes[1].hero_id = bot_hero;
 
     arena_state.nodes[0].x = -4.0f;
@@ -93,7 +97,7 @@ void arena_init(void) {
 }
 
 void arena_set_move_target(int owner, float x, float z) {
-    if (owner < 0 || owner > 1) return;
+    if (owner < 0 || owner >= ARENA_MAX_HEROES) return;
     if (x < -ARENA_HALF_EXTENT) x = -ARENA_HALF_EXTENT;
     if (x > ARENA_HALF_EXTENT) x = ARENA_HALF_EXTENT;
     if (z < -ARENA_HALF_EXTENT) z = -ARENA_HALF_EXTENT;
@@ -164,12 +168,39 @@ static int apply_armor(int raw_damage, float armor) {
     return dmg < 1 ? 1 : dmg;
 }
 
+/* arena_nearest_enemy: the nearest active, living hero on a different team
+ * than `owner` -- generalizes what used to be a hardcoded "the other slot"
+ * lookup (1v1-only) so the same cast functions work for both the 1v1 local
+ * demo (where it trivially resolves to the one other hero) and team mode
+ * (where it picks a real target out of up to 19 others). Returns NULL if
+ * owner is out of range or nobody qualifies (e.g. owner's whole team is the
+ * only one left, or owner itself isn't active). */
+ArenaHero *arena_nearest_enemy(int owner) {
+    if (owner < 0 || owner >= ARENA_MAX_HEROES) return NULL;
+    ArenaHero *self = &arena_state.heroes[owner];
+    if (!self->active) return NULL;
+    ArenaHero *best = NULL;
+    float best_dist = 0.0f;
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+        ArenaHero *cand = &arena_state.heroes[i];
+        if (!cand->active || !cand->alive) continue;
+        if (cand->team == self->team) continue;
+        float dx = cand->x - self->x, dz = cand->z - self->z;
+        float dist = sqrtf(dx * dx + dz * dz);
+        if (!best || dist < best_dist) { best = cand; best_dist = dist; }
+    }
+    return best;
+}
+
 /* hero_is_hittable: The Ghost's W (S170-32) is the first ability in this
  * arena that needs a "can this hero currently be hit at all" concept,
  * distinct from just being alive -- used by auto-attacks and ability
  * damage alike so intangibility means the same thing everywhere. */
 static int hero_is_hittable(const ArenaHero *h) {
-    return h->alive && h->intangible_ms <= 0;
+    /* NULL-safe: arena_nearest_enemy (team mode) returns NULL when nobody
+       qualifies (e.g. the last enemy died mid-tick) -- treat "no target" the
+       same as "not hittable" rather than crashing. */
+    return h && h->alive && h->intangible_ms <= 0;
 }
 
 static void resolve_combat(unsigned int dt_ms) {
@@ -203,14 +234,19 @@ static void resolve_combat(unsigned int dt_ms) {
 static void unicorn_cast_q(ArenaHero *h, ArenaHero *foe) {
     /* Dash toward the current move target if moving, else toward the foe --
        a dash ability needs a direction, and "toward whatever you last
-       clicked, or the enemy if you didn't" is the simplest honest default. */
+       clicked, or the enemy if you didn't" is the simplest honest default.
+       foe may be NULL in team mode (no living enemy at all right now) --
+       fall back to "moving" only in that case; if neither gives a
+       direction, there's nothing to dash toward, so just no-op. */
     float dx, dz;
     if (h->moving) {
         dx = h->target_x - h->x;
         dz = h->target_z - h->z;
-    } else {
+    } else if (foe) {
         dx = foe->x - h->x;
         dz = foe->z - h->z;
+    } else {
+        return;
     }
     float len = sqrtf(dx * dx + dz * dz);
     if (len < 0.01f) return; /* no meaningful direction, e.g. already on top of foe */
@@ -226,7 +262,7 @@ static void unicorn_cast_q(ArenaHero *h, ArenaHero *foe) {
     h->z = nz;
     h->moving = 0;
 
-    if (hero_is_hittable(foe)) {
+    if (foe && hero_is_hittable(foe)) {
         float fdx = foe->x - h->x, fdz = foe->z - h->z;
         if (sqrtf(fdx * fdx + fdz * fdz) <= ARENA_UNICORN_Q_HIT_RADIUS) {
             foe->hp -= apply_armor(ARENA_UNICORN_Q_DAMAGE, arena_hero_armor(foe));
@@ -294,9 +330,9 @@ static void frog_cast_q(ArenaHero *frog) {
 }
 
 void arena_cast_q(int owner) {
-    if (owner < 0 || owner > 1) return;
+    if (owner < 0 || owner >= ARENA_MAX_HEROES) return;
     ArenaHero *h = &arena_state.heroes[owner];
-    ArenaHero *foe = &arena_state.heroes[owner == 0 ? 1 : 0];
+    ArenaHero *foe = arena_nearest_enemy(owner);
     if (!h->alive || h->silenced_ms > 0 || h->q_cooldown_ms > 0) return;
 
     switch (h->hero_id) {
@@ -321,7 +357,7 @@ void arena_cast_q(int owner) {
 }
 
 void arena_toggle_w(int owner) {
-    if (owner < 0 || owner > 1) return;
+    if (owner < 0 || owner >= ARENA_MAX_HEROES) return;
     ArenaHero *h = &arena_state.heroes[owner];
     if (!h->alive || h->silenced_ms > 0) return;
 
@@ -347,9 +383,9 @@ void arena_toggle_w(int owner) {
 }
 
 void arena_cast_r(int owner) {
-    if (owner < 0 || owner > 1) return;
+    if (owner < 0 || owner >= ARENA_MAX_HEROES) return;
     ArenaHero *h = &arena_state.heroes[owner];
-    ArenaHero *foe = &arena_state.heroes[owner == 0 ? 1 : 0];
+    ArenaHero *foe = arena_nearest_enemy(owner);
     if (!h->alive || h->silenced_ms > 0 || h->r_cooldown_ms > 0) return;
 
     switch (h->hero_id) {
@@ -539,4 +575,95 @@ void arena_update(unsigned int dt_ms) {
 
     if (!arena_state.heroes[0].alive) arena_state.winner = 2;
     else if (!arena_state.heroes[1].alive) arena_state.winner = 1;
+}
+
+/* ---- Team mode (2026-07-24, NORTHSTAR §13 cont'd: 10v10, up to
+   ARENA_TEAM_SIZE per side). Additive, not a replacement for the 1v1 local
+   demo above -- arena_update()/arena_init_with_heroes() are untouched, so
+   nothing about the existing solo-vs-bot practice mode changes. Every slot
+   in team mode is filled by a real network client (human or a real
+   apps/arena_bot process) -- there is no internal-bot-AI fallback here,
+   unlike the 1v1 path's arena_bot_tick/bot_cast_kit_if_ready. ---- */
+
+void arena_init_teams(void) {
+    memset(&arena_state, 0, sizeof(arena_state));
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+        ArenaHero *h = &arena_state.heroes[i];
+        int team = (i < ARENA_TEAM_SIZE) ? 0 : 1;
+        int slot_in_team = (team == 0) ? i : (i - ARENA_TEAM_SIZE);
+        /* Two spread-out spawn lines, one per side, mirroring the 1v1
+           demo's -6/+6 split but fanned out along z so a full team doesn't
+           spawn stacked on one point. */
+        h->x = (team == 0) ? -8.0f : 8.0f;
+        h->z = (slot_in_team - (ARENA_TEAM_SIZE - 1) / 2.0f) * 2.0f;
+        h->target_x = h->x;
+        h->target_z = h->z;
+        h->hp = h->max_hp = 100;
+        h->owner = i;
+        h->team = team;
+        h->active = 1;
+        h->alive = 1;
+        h->hero_id = ARENA_HERO_UNICORN; /* placeholder until the real client's draft pick overrides it */
+    }
+    arena_state.nodes[0].x = -4.0f;
+    arena_state.nodes[0].z = 4.0f;
+    arena_state.nodes[1].x = 4.0f;
+    arena_state.nodes[1].z = -4.0f;
+    arena_state.winner = 0;
+}
+
+/* arena_team_alive_count: how many active heroes on `team` are still
+ * alive -- the team-wipe win condition needs this rather than a single
+ * hardcoded pair (§ arena_update's `!heroes[0].alive` check above, which
+ * only ever made sense for exactly 2 heroes). */
+static int arena_team_alive_count(int team) {
+    int count = 0;
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+        ArenaHero *h = &arena_state.heroes[i];
+        if (h->active && h->alive && h->team == team) count++;
+    }
+    return count;
+}
+
+void arena_update_teams(unsigned int dt_ms) {
+    if (arena_state.winner != 0) return;
+    float dt_sec = (float)dt_ms / 1000.0f;
+
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+        ArenaHero *h = &arena_state.heroes[i];
+        if (!h->active) continue;
+        update_hero_motion(h, dt_sec);
+    }
+
+    /* Melee combat: each active, alive hero independently attacks its own
+       nearest enemy if one is in range and its cooldown is ready -- this is
+       the N-hero generalization of the 1v1 resolve_combat's hardcoded pair,
+       and multiple heroes on one side can converge on the same target
+       (a real team-fight dynamic the 1v1 pairwise version never had to
+       handle). */
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+        ArenaHero *h = &arena_state.heroes[i];
+        if (!h->active) continue;
+        if (h->attack_cooldown_ms > 0) h->attack_cooldown_ms -= (int)dt_ms;
+        if (!h->alive) continue;
+        ArenaHero *foe = arena_nearest_enemy(i);
+        if (!foe) continue;
+        float dx = foe->x - h->x, dz = foe->z - h->z;
+        if (sqrtf(dx * dx + dz * dz) > ARENA_ATTACK_RANGE) continue;
+        if (h->attack_cooldown_ms > 0) continue;
+        if (hero_is_hittable(foe)) foe->hp -= apply_armor(ARENA_ATTACK_DAMAGE, arena_hero_armor(foe));
+        if (foe->hp <= 0) { foe->hp = 0; foe->alive = 0; }
+        h->attack_cooldown_ms = ARENA_ATTACK_COOLDOWN_MS;
+    }
+
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+        ArenaHero *h = &arena_state.heroes[i];
+        if (!h->active) continue;
+        tick_hero_kit(h, arena_nearest_enemy(i), dt_ms);
+    }
+
+    int team0_alive = arena_team_alive_count(0);
+    int team1_alive = arena_team_alive_count(1);
+    if (team0_alive == 0) arena_state.winner = 2;
+    else if (team1_alive == 0) arena_state.winner = 1;
 }
