@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-07-24
+
+- NORTHSTAR §12 Phase A (WOTAN player identity, S170-26) started: `apps/server` now captures the
+  real IDUNA-minted `player_id` from every connect ticket instead of discarding it after
+  verification (`client_player_id`/`client_has_player_id`, keyed per client slot) — the prerequisite
+  Phase B (replay logging) needs to attribute matches to real players. Ported
+  `packages/common/http_client.h` (verbatim from shankpit-460) and IDUNA agent config loading.
+  Reporting REDGARDEN win/loss results into IDUNA is deliberately not wired yet — its
+  `/api/v1/players/{id}/session` endpoint is FPS-shaped (kills/deaths), REDGARDEN's `match_winner`
+  isn't; flagged as an open schema question rather than forced in wrong. All existing tests
+  (`test_10_bots.sh`, `test_arena.sh`) still pass.
+
 ## 2026-07-23
 
 - Fixed `GL/glu.h` missing (installed `libglu1-mesa-dev`) — `apps/lobby` and `apps/arena` now build clean.

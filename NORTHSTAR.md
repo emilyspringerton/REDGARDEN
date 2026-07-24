@@ -346,11 +346,28 @@ predicted this moment: "when replays/ML-training/esports work actually starts, t
 real corpus of match data to build against"). Phased, per founder direction ("not all at once
 obviously in phases"):
 
-**Phase A — WOTAN player identity (prerequisite, not parallel).** Founder's own dependency
-reasoning: "how can we find replays if we don't have players on wotan ya know?" A replay is only
-useful once it's attributable to someone — WOTAN (`okemily.com/tournaments.html`'s existing
-product, not a new one) needs a real player-stats/identity surface before replays are worth
-watching, not after. This phase must land before Phase B is worth anything, not just before it.
+**Phase A — WOTAN player identity (prerequisite, not parallel). Started 2026-07-24 (S170-26).**
+Founder's own dependency reasoning: "how can we find replays if we don't have players on wotan ya
+know?" A replay is only useful once it's attributable to someone — WOTAN
+(`okemily.com/tournaments.html`'s existing product, not a new one) needs a real player-stats/
+identity surface before replays are worth watching, not after. This phase must land before Phase B
+is worth anything, not just before it.
+
+**Done so far:** `apps/server/src/main.c` was already verifying a real IDUNA-minted `player_id`
+inside every connect ticket, but discarding it right after verification. Now captured per client
+slot (`client_player_id[MAX_CLIENTS]` / `client_has_player_id[MAX_CLIENTS]`) — the actual
+prerequisite Phase B needs to key replay events to a real player, not a slot index. Also ported
+`packages/common/http_client.h` (verbatim from shankpit-460's S156-04 original) and IDUNA agent
+config loading (`IDUNA_BASE_URL`/`IDUNA_AGENT_NAME`/`IDUNA_AGENT_SECRET`), matching shankpit-460's
+pattern exactly.
+
+**Deliberately not done yet — a real fork, not an oversight.** shankpit-460 reports FPS
+`kills`/`deaths` to IDUNA's `/api/v1/players/{id}/session` endpoint; that schema is FPS-specific.
+REDGARDEN is a card-RTS with a `match_winner` field (win/loss), not kills/deaths — forcing one
+into the other's columns would corrupt shared WOTAN profile semantics across every game using that
+table. Reporting REDGARDEN results into IDUNA needs either a genre-agnostic schema addition
+(`wins`/`losses`/`matches_played` columns) or a separate endpoint. That's a real IDUNA schema
+decision, flagged here rather than guessed past — see `EMILY/BACKLOG.md` S170-26.
 
 **Phase B — Replay logging.** Extends §10's already-specified minimum hook (`red_garden_server`
 per-match `var/matches/<port>-<timestamp>.jsonl` event log) to `apps/arena`'s MOBA mode too —

@@ -19,11 +19,77 @@
 
 #include "../../../packages/common/protocol.h"
 #include "../../../packages/common/hmac_sha256.h"
+#include "../../../packages/common/http_client.h"
 #include "../../../packages/simulation/local_game.h"
 
 static int sock = -1;
 static struct sockaddr_in bind_addr;
 static unsigned int client_last_seq[MAX_CLIENTS];
+
+// WOTAN player identity (EMILY/BACKLOG.md S170-26, REDGARDEN NORTHSTAR §12
+// Phase A). The connect ticket already carries a real IDUNA-minted
+// player_id (see verify_connect_ticket below) but it was previously
+// discarded right after verification. Captured here per client slot so
+// Phase B (replay logging) can key match events to a real WOTAN player
+// instead of just a slot index.
+static unsigned char client_player_id[MAX_CLIENTS][16];
+static int client_has_player_id[MAX_CLIENTS];
+
+// IDUNA agent config — same env vars / parsing as shankpit-460's
+// apps/server/src/main.c (S156-04), ported here for S170-26. Not yet used
+// to report match results: REDGARDEN's match_winner (win/loss, card-RTS) is
+// a different shape than shankpit-460's kills/deaths (FPS), and forcing one
+// into the other's IDUNA schema would corrupt shared WOTAN profile
+// semantics. This pass only loads the config and exposes it for Phase B;
+// see the S170-26 backlog entry for the open schema question.
+static char iduna_host[128] = "127.0.0.1";
+static int iduna_port = 8080;
+static char iduna_agent_name[128] = "";
+static char iduna_agent_secret[256] = "";
+static int iduna_agent_configured = 0;
+
+// load_iduna_agent_config reads IDUNA_BASE_URL / IDUNA_AGENT_NAME /
+// IDUNA_AGENT_SECRET at startup. IDUNA_BASE_URL may be "host:port" or a
+// full "http://host:port" URL (scheme and any trailing path are stripped);
+// defaults to 127.0.0.1:8080 if unset.
+static void load_iduna_agent_config(void) {
+    const char *base_url = getenv("IDUNA_BASE_URL");
+    if (base_url && base_url[0]) {
+        const char *host_start = base_url;
+        if (strncmp(host_start, "http://", 7) == 0) host_start += 7;
+        else if (strncmp(host_start, "https://", 8) == 0) host_start += 8;
+
+        char host_buf[128];
+        strncpy(host_buf, host_start, sizeof(host_buf) - 1);
+        host_buf[sizeof(host_buf) - 1] = '\0';
+        char *slash = strchr(host_buf, '/');
+        if (slash) *slash = '\0';
+
+        char *colon = strchr(host_buf, ':');
+        int port = iduna_port;
+        if (colon) {
+            port = atoi(colon + 1);
+            *colon = '\0';
+        }
+        strncpy(iduna_host, host_buf, sizeof(iduna_host) - 1);
+        iduna_host[sizeof(iduna_host) - 1] = '\0';
+        if (port > 0) iduna_port = port;
+    }
+
+    const char *name = getenv("IDUNA_AGENT_NAME");
+    const char *secret = getenv("IDUNA_AGENT_SECRET");
+    if (name && name[0] && secret && secret[0]) {
+        strncpy(iduna_agent_name, name, sizeof(iduna_agent_name) - 1);
+        iduna_agent_name[sizeof(iduna_agent_name) - 1] = '\0';
+        strncpy(iduna_agent_secret, secret, sizeof(iduna_agent_secret) - 1);
+        iduna_agent_secret[sizeof(iduna_agent_secret) - 1] = '\0';
+        iduna_agent_configured = 1;
+        printf("IDUNA agent configured: name=%s host=%s:%d (player identity reporting available for Phase B)\n",
+               iduna_agent_name, iduna_host, iduna_port);
+    } else {
+        printf("WARNING: IDUNA_AGENT_NAME/IDUNA_AGENT_SECRET not set -- WOTAN player identity features disabled (S170-26)\n");
+    }
+}
 
 // Connect-ticket verification — same scheme as shankpit-460 (see
 // shankpit-460/apps/server/src/main.c and IDUNA's ShankpitTicketHandler,
@@ -135,6 +201,15 @@ static void server_handle_packet(struct sockaddr_in *sender, char *buffer, int s
                 client_id = i;
                 local_state.client_active[i] = 1;
                 local_state.clients[i] = *sender;
+                // Capture the ticket's player_id (first 16 bytes of the
+                // payload verify_connect_ticket already authenticated) —
+                // S170-26, the actual WOTAN-identity prerequisite Phase B
+                // needs. Test bots self-mint tickets with random bytes here
+                // (not a real registered IDUNA player_id); real players'
+                // tickets carry the genuine one minted at login.
+                const unsigned char *ticket_payload = (const unsigned char *)(buffer + sizeof(NetHeader));
+                memcpy(client_player_id[client_id], ticket_payload, 16);
+                client_has_player_id[client_id] = 1;
                 NetHeader h = {0};
                 h.type = PACKET_WELCOME;
                 h.client_id = (uint8_t)client_id;
@@ -201,6 +276,7 @@ int main(int argc, char *argv[]) {
         }
     }
     load_ticket_secret();
+    load_iduna_agent_config();
     server_net_init(port);
     local_init_match(2);
     int running = 1;
