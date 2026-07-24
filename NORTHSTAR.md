@@ -397,12 +397,28 @@ running the windowed client end-to-end the way `apps/server`'s log was verified 
 
 Phase B is now closed for both halves (RTS + MOBA) under this box's constraints.
 
-**Phase C — Observer mode, first-class.** Founder: "observer mode is a first class citizen." Not
-a bolted-on debug view — a real client mode that reads Phase B's logs (live-tailing an in-progress
-match, or fully played back after) through the existing renderer, same draw code, no second
-rendering path. "I want to start watching replays asap" is the actual product pressure behind
-this phase; Phase A/B are the real prerequisites standing between here and that, not extra scope
-invented along the way.
+**Phase C — Observer mode, first-class. Started 2026-07-24 (S170-30), arena half.** Founder:
+"observer mode is a first class citizen." Not a bolted-on debug view — a real client mode that
+reads Phase B's logs (live-tailing an in-progress match, or fully played back after) through the
+existing renderer, same draw code, no second rendering path. "I want to start watching replays
+asap" is the actual product pressure behind this phase; Phase A/B are the real prerequisites
+standing between here and that, not extra scope invented along the way.
+
+**Done — arena playback.** New `packages/simulation/arena_replay.h`/`.c`: a fixed-format parser
+(same "no general JSON parser for self-produced, controlled data" spirit as `http_client.h`) reads
+an `apps/arena` match log into an `ArenaReplay` (parsed snapshots + winner), and
+`arena_replay_apply_at()` drives `ArenaState.heroes[0]/[1].x/z/hp` directly from it, linearly
+interpolating between the 500ms-spaced snapshots so playback isn't choppy. `red_garden_arena
+--observe var/matches/arena-<ts>.jsonl` runs this through the *exact same* render loop as live
+play — camera control still works, movement clicks/kit casts/live-match restart are disabled,
+`R` restarts *playback* from the beginning instead. 6 new headless tests
+(`tests/test_arena_replay.c`) cover the parser and the interpolation/winner-timing logic — this
+part doesn't need a display to verify, unlike the windowed rendering itself, which (per S170-29's
+same standing constraint) couldn't be run end-to-end on this box.
+
+**Not done yet — playback for the RTS side (`apps/server`'s logs) and true live-tailing (reading a
+log file that's still being appended to, not just a completed one).** Both are real, separate next
+steps within Phase C, not silently folded into this pass.
 
 **Phase D — Full roster in arena.** Extends S170-18's proof-of-concept (The Unicorn, player-hero-
 only, one kit) to the rest of `docs/HEROES_VS0.md`'s roster, both sides (bot included) — the

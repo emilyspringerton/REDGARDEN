@@ -19,6 +19,7 @@
 
 #include "../../../packages/common/mat4.h"
 #include "../../../packages/simulation/arena_game.h"
+#include "../../../packages/simulation/arena_replay.h"
 
 /* Match event log — MOBA half of NORTHSTAR §12 Phase B (EMILY/BACKLOG.md
  * S170-29), extending apps/server's S170-28 pattern to this demo. Same
@@ -409,7 +410,25 @@ static int screen_to_ground(int mx, int my, int w, int h, float fov_deg,
 }
 
 int main(int argc, char *argv[]) {
-    (void)argc; (void)argv;
+    /* Observer mode (NORTHSTAR §12 Phase C, EMILY/BACKLOG.md S170-30):
+     * `red_garden_arena --observe var/matches/arena-<ts>.jsonl` plays back
+     * a logged match through this exact same renderer instead of driving
+     * ArenaState from live input/bot AI -- "same draw code, no second
+     * rendering path" per the founder's requirement. */
+    ArenaReplay replay;
+    int observing = 0;
+    uint32_t observe_elapsed_ms = 0;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--observe") == 0 && i + 1 < argc) {
+            if (!arena_replay_load(argv[i + 1], &replay)) {
+                fprintf(stderr, "--observe: could not open %s\n", argv[i + 1]);
+                return 1;
+            }
+            observing = 1;
+            printf("OBSERVER MODE: replaying %s (%d snapshots)\n", argv[i + 1], replay.count);
+        }
+    }
+
     SDL_Init(SDL_INIT_VIDEO);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
@@ -417,8 +436,9 @@ int main(int argc, char *argv[]) {
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
     int win_w = 1280, win_h = 720;
-    SDL_Window *win = SDL_CreateWindow("RED GARDEN — ARENA DEMO", 100, 100, win_w, win_h,
-                                        SDL_WINDOW_OPENGL);
+    SDL_Window *win = SDL_CreateWindow(
+        observing ? "RED GARDEN — OBSERVER MODE" : "RED GARDEN — ARENA DEMO",
+        100, 100, win_w, win_h, SDL_WINDOW_OPENGL);
     if (!win) { fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError()); return 1; }
     SDL_GLContext ctx = SDL_GL_CreateContext(win);
     if (!ctx) { fprintf(stderr, "SDL_GL_CreateContext failed: %s\n", SDL_GetError()); return 1; }
@@ -442,7 +462,7 @@ int main(int argc, char *argv[]) {
     glEnable(GL_DEPTH_TEST);
 
     arena_init();
-    arena_log_open();
+    if (!observing) arena_log_open(); /* never write a log while replaying one */
 
     int dragging_cam = 0;
     int last_mx = 0, last_my = 0;
@@ -454,7 +474,11 @@ int main(int argc, char *argv[]) {
         uint32_t now = SDL_GetTicks();
         uint32_t dt = now - last_tick;
         last_tick = now;
-        arena_log_elapsed_ms += dt;
+        if (observing) {
+            observe_elapsed_ms += dt;
+        } else {
+            arena_log_elapsed_ms += dt;
+        }
 
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -481,7 +505,11 @@ int main(int argc, char *argv[]) {
                 if (cam_dist < 4.0f) cam_dist = 4.0f;
                 if (cam_dist > 30.0f) cam_dist = 30.0f;
             }
-            if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT &&
+            /* Everything below drives a live match (movement clicks, kit
+             * casts, restart-into-a-new-match) -- none of it applies while
+             * observing a logged one. Camera control above still works, so
+             * an observer can look around freely. */
+            if (!observing && e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT &&
                 arena_state.winner == 0) {
                 float gx, gz;
                 float focus_x = arena_state.heroes[0].x, focus_z = arena_state.heroes[0].z;
@@ -492,22 +520,31 @@ int main(int argc, char *argv[]) {
                 }
             }
             if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_r) {
-                arena_init();
-                memset(rings, 0, sizeof(rings));
-                arena_log_open(); /* fresh match -> fresh log file, S170-29 */
-                win_logged = 0;
+                if (observing) {
+                    observe_elapsed_ms = 0; /* restart playback from the beginning */
+                    arena_state.winner = 0;
+                } else {
+                    arena_init();
+                    memset(rings, 0, sizeof(rings));
+                    arena_log_open(); /* fresh match -> fresh log file, S170-29 */
+                    win_logged = 0;
+                }
             }
             /* The Unicorn's kit (docs/HEROES_VS0.md) — player hero (owner 0) only,
              * S170-18. R is already bound to "restart match" in this demo, so the
              * ultimate goes on E rather than colliding with it. */
-            if (e.type == SDL_KEYDOWN && arena_state.winner == 0) {
+            if (!observing && e.type == SDL_KEYDOWN && arena_state.winner == 0) {
                 if (e.key.keysym.sym == SDLK_q) { arena_cast_q(0); arena_log_ability("Q"); }
                 if (e.key.keysym.sym == SDLK_w) { arena_toggle_w(0); arena_log_ability("W"); }
                 if (e.key.keysym.sym == SDLK_e) { arena_cast_r(0); arena_log_ability("R"); }
             }
         }
 
-        if (arena_state.winner == 0) {
+        if (observing) {
+            /* Drive the exact same ArenaState the live path draws from --
+             * "same draw code, no second rendering path" (S170-30). */
+            arena_replay_apply_at(&replay, observe_elapsed_ms, &arena_state);
+        } else if (arena_state.winner == 0) {
             arena_update(dt);
             arena_log_since_snapshot_ms += dt;
             if (arena_log_since_snapshot_ms >= ARENA_LOG_SNAPSHOT_INTERVAL_MS) {

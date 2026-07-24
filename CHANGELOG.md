@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-07-24 (4)
+
+- NORTHSTAR §12 Phase C (observer mode, S170-30) started, arena half: new
+  `packages/simulation/arena_replay.h`/`.c` parses an `apps/arena` match log and drives
+  `ArenaState` directly from it (linear interpolation between the 500ms snapshots). New
+  `red_garden_arena --observe <path>` flag plays a logged match back through the same render
+  loop as live play (camera control active, live-match input disabled, `R` restarts playback).
+  6 new headless tests (`tests/test_arena_replay.c`), all green; `build_arena.sh` and
+  `test_arena.sh` updated to include the new files. RTS-side playback and true live-tailing
+  remain open, separate next steps.
+
 ## 2026-07-24 (3)
 
 - NORTHSTAR §12 Phase B (replay logging, S170-29) closed for the MOBA half: `apps/arena` now

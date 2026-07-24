@@ -14,4 +14,5 @@ gcc -std=c99 -O2 -Wall -Wextra -I"${ROOT_DIR}/packages" \
   -o "${BUILD_DIR}/red_garden_arena" \
   "${ROOT_DIR}/apps/arena/src/main.c" \
   "${ROOT_DIR}/packages/simulation/arena_game.c" \
+  "${ROOT_DIR}/packages/simulation/arena_replay.c" \
   -lSDL2 -lGL -lm
