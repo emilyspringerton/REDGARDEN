@@ -732,3 +732,30 @@ live networked match (team-colored heroes, HUD, camera) has not been visually co
 box (no Xvfb) — everything verified above is from the wire protocol and match logs, not from
 looking at a rendered frame. That remains the one real gap between "the system works" and "a human
 has seen it work."
+
+**A real gap closed, 2026-07-24 (S170-44): a human player can now join whatever match the bot
+pool is currently matchmaking into.** Until today, `apps/arena`'s human client only supported
+`--connect host:port` — a direct connection to an *already-known* server address. That's useless
+against a persistent bot pool, where the matchmaker dynamically assigns a new port per match; there
+was no way for a human to actually queue into the same pool the bots were playing in. Added
+`--queue <matchmaker_host>` (`--matchmaker-port`, default 7778, matching `apps/arena_bot`'s
+existing default): sends `PACKET_FIND_MATCH` to the matchmaker, waits for `PACKET_MATCH_FOUND`
+(same ~5s retry interval as `apps/arena_bot`'s own queue logic, for the same same-box-race reason),
+then reuses `net_connect`'s existing ticket-mint/`PACKET_CONNECT` handshake against whatever port
+comes back — no new server-side code needed, this was purely a client-side gap.
+
+**Verified live:** started a real matchmaker (`--lobby-size 2`) + one persistent `apps/arena_bot`,
+then ran `red_garden_arena --queue 127.0.0.1`. Confirmed end to end: `Queuing for a match...` →
+`Match found on port 7510 -- connecting...` → `Connected -- assigned hero slot 1`, matched against
+the bot (which logged `connected -- hero slot 0`) on the *same* spawned server. This is the join
+mechanism fully proven at the protocol level — the human client reached the same match a live bot
+was in, via the same pool, the same way a bot would. (First attempt at this test failed with the
+server rejecting all connects; root cause was a test-setup mistake, not a code bug — the matchmaker
+process had been started in a shell missing `REDGARDEN_TICKET_SECRET`, so the arena_server it spawned
+inherited no ticket secret and failed closed, correctly, exactly as designed. Restarting the whole
+stack with the secret actually exported fixed it immediately.)
+
+**Still bounded by the same known gap, not a new one:** the client then hit `SDL_Init`/window
+creation with no display (no Xvfb on this box, same limitation noted above) before it could send a
+draft pick or move — so no full match was played end-to-end visually. The *join* is proven; playing
+once joined still needs either a real display or Xvfb, unchanged from before.

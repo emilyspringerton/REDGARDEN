@@ -228,6 +228,62 @@ static int net_connect(const char *host, int port) {
     return 0;
 }
 
+/* net_find_and_connect -- queue into the matchmaker's pool (the same one
+ * apps/arena_bot's persistent bots queue into) instead of connecting to an
+ * already-known server:port. Reuses net_connect's ticket-minting/PACKET_CONNECT
+ * handshake for the actual game connection once a match is assigned; only the
+ * "how do I find a port" step differs from --connect. Lets a real human join
+ * whatever match the bot pool is currently matchmaking into (NORTHSTAR §13,
+ * "the human will join the bot games to validate, bot-first feedback loop"). */
+static int net_find_and_connect(const char *mm_host, int mm_port) {
+    net_sock = socket(AF_INET, SOCK_DGRAM, 0);
+    int flags = fcntl(net_sock, F_GETFL, 0);
+    fcntl(net_sock, F_SETFL, flags | O_NONBLOCK);
+
+    struct sockaddr_in mm_addr = {0};
+    mm_addr.sin_family = AF_INET;
+    mm_addr.sin_port = htons((uint16_t)mm_port);
+    mm_addr.sin_addr.s_addr = inet_addr(mm_host);
+
+    NetHeader find = {0};
+    find.type = PACKET_FIND_MATCH;
+    sendto(net_sock, &find, sizeof(find), 0, (struct sockaddr *)&mm_addr, sizeof(mm_addr));
+
+    printf("Queuing for a match at %s:%d ...\n", mm_host, mm_port);
+    int game_port = -1;
+    for (int retry_ticks = 0; retry_ticks < 1200; retry_ticks++) {
+        char buf[64];
+        struct sockaddr_in sender;
+        socklen_t slen = sizeof(sender);
+        int len = recvfrom(net_sock, buf, sizeof(buf), 0, (struct sockaddr *)&sender, &slen);
+        if (len >= (int)(sizeof(NetHeader) + sizeof(MatchFoundMsg))) {
+            NetHeader *h = (NetHeader *)buf;
+            if (h->type == PACKET_MATCH_FOUND) {
+                MatchFoundMsg *msg = (MatchFoundMsg *)(buf + sizeof(NetHeader));
+                game_port = msg->port;
+                break;
+            }
+        }
+        SDL_Delay(100);
+        /* Resend every ~5s, not every tick -- same same-box retry-race
+           reasoning as apps/arena_bot's wait_for_match (found live, S170-43):
+           resending too eagerly can race the matchmaker's own near-instant
+           reply and re-enqueue a phantom entry. */
+        if (retry_ticks % 50 == 0 && retry_ticks > 0) {
+            sendto(net_sock, &find, sizeof(find), 0, (struct sockaddr *)&mm_addr, sizeof(mm_addr));
+        }
+    }
+    if (game_port < 0) {
+        fprintf(stderr, "Timed out waiting for a match (60s). Is the matchmaker/bot pool running?\n");
+        return 0;
+    }
+    printf("Match found on port %d -- connecting...\n", game_port);
+    /* net_connect opens its own fresh socket; close the queue socket first. */
+    close(net_sock);
+    net_sock = -1;
+    return net_connect(mm_host, game_port);
+}
+
 static void net_send_move(float x, float z) {
     char buf[sizeof(NetHeader) + sizeof(ArenaMoveCmd)];
     NetHeader *h = (NetHeader *)buf;
@@ -680,6 +736,8 @@ int main(int argc, char *argv[]) {
     uint32_t observe_elapsed_ms = 0;
     const char *connect_host = NULL;
     int connect_port = 7200;
+    const char *queue_host = NULL;
+    int queue_port = 7778; /* apps/matchmaker's documented arena listen-port */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--observe") == 0 && i + 1 < argc) {
             if (!arena_replay_load(argv[i + 1], &replay)) {
@@ -694,6 +752,13 @@ int main(int argc, char *argv[]) {
             connect_host = argv[++i];
         } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             connect_port = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--queue") == 0 && i + 1 < argc) {
+            /* Join whatever match the persistent bot pool is currently
+               matchmaking into, instead of connecting to an already-known
+               server (S170-44: "moba player can join bot pool games"). */
+            queue_host = argv[++i];
+        } else if (strcmp(argv[i], "--matchmaker-port") == 0 && i + 1 < argc) {
+            queue_port = atoi(argv[++i]);
         }
     }
 #ifndef _WIN32
@@ -704,10 +769,17 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Failed to connect to arena server at %s:%d\n", connect_host, connect_port);
             return 1;
         }
+    } else if (queue_host) {
+        net_mode = 1;
+        load_iduna_agent_config();
+        if (!net_find_and_connect(queue_host, queue_port)) {
+            fprintf(stderr, "Failed to join a match via matchmaker at %s:%d\n", queue_host, queue_port);
+            return 1;
+        }
     }
 #else
-    if (connect_host) {
-        fprintf(stderr, "--connect is not supported on Windows builds yet.\n");
+    if (connect_host || queue_host) {
+        fprintf(stderr, "--connect/--queue are not supported on Windows builds yet.\n");
         return 1;
     }
 #endif
@@ -721,7 +793,7 @@ int main(int argc, char *argv[]) {
     int win_w = 1280, win_h = 720;
     SDL_Window *win = SDL_CreateWindow(
         observing ? "RED GARDEN — OBSERVER MODE" :
-        (connect_host ? "RED GARDEN — MOBA (networked PvP)" : "RED GARDEN — MOBA (local)"),
+        (net_mode ? "RED GARDEN — MOBA (networked PvP)" : "RED GARDEN — MOBA (local)"),
         100, 100, win_w, win_h, SDL_WINDOW_OPENGL);
     if (!win) { fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError()); return 1; }
     SDL_GLContext ctx = SDL_GL_CreateContext(win);
