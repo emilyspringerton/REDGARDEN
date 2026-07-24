@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-07-24 (24)
+
+- fix(arena): the actual root cause of the Windows build failure, found by locally reproducing
+  the cross-compile (downloaded `gcc-mingw-w64-x86-64-win32` + deps via `apt-get download`,
+  extracted with `dpkg-deb -x`, no sudo/root needed) instead of guessing blind against CI (S170-54
+  cont'd). The whole networking section of `apps/arena/src/main.c` (ticket minting, WOTAN
+  registration, `net_connect`, `net_find_and_connect`, snapshot polling — ~300 lines) was still
+  wrapped in one big `#ifndef _WIN32`, so none of it was ever compiled on Windows at all despite
+  the earlier per-call portability fixes — `main()`'s calls to these functions produced "implicit
+  declaration" + linker "undefined reference" errors. Removed that outer guard now that the
+  platform differences inside are each handled individually (winsock includes, ioctlsocket/fcntl,
+  closesocket/close, mkdir, and one more found this pass: `getpid()` is POSIX-only, added a
+  `GetCurrentProcessId()` branch). Also silenced two real `sendto()` type-mismatch warnings
+  (Winsock wants `const char *`, POSIX accepts anything pointer-shaped). **Verified: a real
+  `RedGarden.exe` (PE32+, Windows) now builds clean locally with zero errors and zero warnings**,
+  Linux side (`build_arena.sh`, full test suite) still green. Same fix pushed for CI to confirm
+  independently.
+
 ## 2026-07-24 (23)
 
 - fix(arena): real Windows portability for `apps/arena/src/main.c`'s networking, found by

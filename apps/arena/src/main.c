@@ -47,7 +47,14 @@
 static int net_mode = 0;
 static int my_owner = 0; /* which arena_state.heroes[] slot is "me" -- 0 in local mode always */
 
-#ifndef _WIN32
+/* This whole networking section (through the matching closing comment
+ * below) used to be #ifndef _WIN32-only, with main() stubbing out
+ * --connect/--queue entirely on Windows as a result. Now that the
+ * platform-specific internals (winsock includes, ioctlsocket/fcntl,
+ * closesocket/close, GetCurrentProcessId/getpid, mkdir) are each guarded
+ * individually where they actually differ, this compiles and works on
+ * both -- S170-54, found by actually watching the Windows cross-compile
+ * fail rather than assuming the workflow alone would catch it. */
 #define ARENA_TICKET_PAYLOAD_LEN 20
 #define ARENA_TICKET_TOTAL_LEN (ARENA_TICKET_PAYLOAD_LEN + 16)
 
@@ -125,8 +132,13 @@ static int get_real_wotan_ticket(unsigned char out[ARENA_TICKET_TOTAL_LEN]) {
     }
 
     char provider_sub[64];
+#ifdef _WIN32
+    snprintf(provider_sub, sizeof(provider_sub), "player-%lu-%u",
+             (unsigned long)GetCurrentProcessId(), (unsigned int)time(NULL));
+#else
     snprintf(provider_sub, sizeof(provider_sub), "player-%d-%u",
              (int)getpid(), (unsigned int)time(NULL));
+#endif
     char register_body[256];
     snprintf(register_body, sizeof(register_body),
              "{\"provider\":\"redgarden_bot\",\"provider_sub\":\"%s\"}", provider_sub);
@@ -260,7 +272,7 @@ static int net_find_and_connect(const char *mm_host, int mm_port) {
 
     NetHeader find = {0};
     find.type = PACKET_FIND_MATCH;
-    sendto(net_sock, &find, sizeof(find), 0, (struct sockaddr *)&mm_addr, sizeof(mm_addr));
+    sendto(net_sock, (const char *)&find, sizeof(find), 0, (struct sockaddr *)&mm_addr, sizeof(mm_addr));
 
     printf("Queuing for a match at %s:%d ...\n", mm_host, mm_port);
     int game_port = -1;
@@ -283,7 +295,7 @@ static int net_find_and_connect(const char *mm_host, int mm_port) {
            resending too eagerly can race the matchmaker's own near-instant
            reply and re-enqueue a phantom entry. */
         if (retry_ticks % 50 == 0 && retry_ticks > 0) {
-            sendto(net_sock, &find, sizeof(find), 0, (struct sockaddr *)&mm_addr, sizeof(mm_addr));
+            sendto(net_sock, (const char *)&find, sizeof(find), 0, (struct sockaddr *)&mm_addr, sizeof(mm_addr));
         }
     }
     if (game_port < 0) {
@@ -352,7 +364,7 @@ static void net_poll_snapshots(void) {
         len = recvfrom(net_sock, rbuf, sizeof(rbuf), 0, (struct sockaddr *)&sender, &slen);
     }
 }
-#endif
+/* end of the S170-54 cross-platform networking section */
 
 /* Match event log — MOBA half of NORTHSTAR §12 Phase B (EMILY/BACKLOG.md
  * S170-29), extending apps/server's S170-28 pattern to this demo. Same
