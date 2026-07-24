@@ -334,7 +334,19 @@ static void net_send_cast(int slot) {
     sendto(net_sock, buf, sizeof(buf), 0, (struct sockaddr *)&net_server_addr, sizeof(net_server_addr));
 }
 
+static void net_send_pick(int hero_id) {
+    char buf[sizeof(NetHeader) + sizeof(ArenaPickCmd)];
+    NetHeader *h = (NetHeader *)buf;
+    memset(h, 0, sizeof(NetHeader));
+    h->type = PACKET_ARENA_PICK;
+    ArenaPickCmd *cmd = (ArenaPickCmd *)(buf + sizeof(NetHeader));
+    cmd->hero_id = (uint8_t)hero_id;
+    sendto(net_sock, buf, sizeof(buf), 0, (struct sockaddr *)&net_server_addr, sizeof(net_server_addr));
+}
+
 static int net_lobby_size = 2; /* set from the server's own msg->count once a snapshot arrives */
+static uint8_t net_phase = ARENA_PHASE_WAITING;
+static int net_picked = 0; /* have we sent our PACKET_ARENA_PICK for the current draft yet */
 
 static void net_poll_snapshots(void) {
     char rbuf[2048];
@@ -347,6 +359,20 @@ static void net_poll_snapshots(void) {
             if (h->type == PACKET_ARENA_SNAPSHOT) {
                 ArenaSnapshotMsg *msg = (ArenaSnapshotMsg *)(rbuf + sizeof(NetHeader));
                 net_lobby_size = msg->count;
+                net_phase = msg->phase;
+                if (net_phase == ARENA_PHASE_DRAFT && !net_picked) {
+                    /* Auto-draft (S170-66/68): the client has no pick UI yet, and the
+                       founder confirmed auto-draft is fine for now -- same roster-spread
+                       rule apps/arena_bot already uses, so the human doesn't get stuck
+                       in ARENA_PHASE_DRAFT forever waiting on input that never comes. */
+                    int hero_id = my_owner % 11; /* ARENA_HERO_UNICORN..COURIER */
+                    net_send_pick(hero_id);
+                    net_picked = 1;
+                    printf("[arena client] auto-drafted hero_id=%d for slot %d\n", hero_id, my_owner);
+                    fflush(stdout);
+                } else if (net_phase != ARENA_PHASE_DRAFT) {
+                    net_picked = 0; /* reset so the next draft (after a requeue) picks again */
+                }
                 for (int i = 0; i < msg->count && i < ARENA_SNAPSHOT_MAX_HEROES; i++) {
                     ArenaHero *dst = &arena_state.heroes[i];
                     dst->x = msg->heroes[i].x;
@@ -912,12 +938,44 @@ int main(int argc, char *argv[]) {
                 float focus_x = arena_state.heroes[my_owner].x, focus_z = arena_state.heroes[my_owner].z;
                 if (screen_to_ground(e.button.x, e.button.y, win_w, win_h, 60.0f,
                                      focus_x, focus_z, &gx, &gz)) {
-#ifndef _WIN32
                     if (net_mode) net_send_move(gx, gz);
-                    else
-#endif
-                        arena_set_move_target(my_owner, gx, gz);
+                    else arena_set_move_target(my_owner, gx, gz);
                     spawn_ring(gx, gz);
+                }
+            }
+            /* Requeue-after-win OK button (S170-66/68: "we need to requeue after
+             * a game after an ok button"). Only meaningful in net_mode -- local
+             * practice mode already has its own R-to-restart below. Click box
+             * matches the one drawn under the YOU WIN/YOU LOSE text further down;
+             * SDL mouse y is top-down, the ortho HUD draw space is bottom-up, so
+             * flip before hit-testing against those same screen-space bounds. */
+            if (net_mode && !observing && e.type == SDL_MOUSEBUTTONDOWN &&
+                e.button.button == SDL_BUTTON_LEFT && arena_state.winner != 0) {
+                float bx = e.button.x, by = win_h - e.button.y;
+                float ok_left = win_w / 2.0f - 90, ok_right = win_w / 2.0f + 90;
+                float ok_bottom = win_h / 2.0f - 70, ok_top = win_h / 2.0f - 30;
+                if (bx >= ok_left && bx <= ok_right && by >= ok_bottom && by <= ok_top) {
+                    printf("[arena client] requeuing for another match...\n");
+                    fflush(stdout);
+#ifdef _WIN32
+                    if (net_sock >= 0) closesocket(net_sock);
+#else
+                    if (net_sock >= 0) close(net_sock);
+#endif
+                    net_sock = -1;
+                    memset(&arena_state, 0, sizeof(arena_state));
+                    memset(rings, 0, sizeof(rings));
+                    win_logged = 0;
+                    net_picked = 0;
+                    net_phase = ARENA_PHASE_WAITING;
+                    int reconnected = queue_host ? net_find_and_connect(queue_host, queue_port)
+                                                  : net_connect(connect_host, connect_port);
+                    if (!reconnected) {
+                        fprintf(stderr, "[arena client] requeue failed -- matchmaker/bot pool may be down\n");
+                    } else {
+                        printf("[arena client] requeue connected -- hero slot %d\n", my_owner);
+                    }
+                    fflush(stdout);
                 }
             }
             if (!net_mode && e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_r) {
@@ -936,14 +994,11 @@ int main(int argc, char *argv[]) {
              * match" in local mode, so the ultimate goes on E. In net_mode,
              * casts are sent to the server, which owns cooldowns/effects. */
             if (!observing && e.type == SDL_KEYDOWN && arena_state.winner == 0) {
-#ifndef _WIN32
                 if (net_mode) {
                     if (e.key.keysym.sym == SDLK_q) net_send_cast(0);
                     if (e.key.keysym.sym == SDLK_w) net_send_cast(1);
                     if (e.key.keysym.sym == SDLK_e) net_send_cast(2);
-                } else
-#endif
-                {
+                } else {
                     if (e.key.keysym.sym == SDLK_q) { arena_cast_q(my_owner); arena_log_ability("Q"); }
                     if (e.key.keysym.sym == SDLK_w) { arena_toggle_w(my_owner); arena_log_ability("W"); }
                     if (e.key.keysym.sym == SDLK_e) { arena_cast_r(my_owner); arena_log_ability("R"); }
@@ -956,14 +1011,12 @@ int main(int argc, char *argv[]) {
              * "same draw code, no second rendering path" (S170-30). */
             arena_replay_apply_at(&replay, observe_elapsed_ms, &arena_state);
         }
-#ifndef _WIN32
         else if (net_mode) {
             /* apps/arena_server is authoritative -- apply its snapshots
                rather than running arena_update() locally (that would
                double-simulate and diverge from the server's own state). */
             net_poll_snapshots();
         }
-#endif
         else if (arena_state.winner == 0) {
             arena_update(dt);
             arena_log_since_snapshot_ms += dt;
@@ -1124,6 +1177,18 @@ int main(int argc, char *argv[]) {
             } else {
                 glColor3f(1.0f, 0.2f, 0.2f);
                 draw_string("YOU LOSE", win_w / 2.0f - 160, win_h / 2.0f, 24);
+            }
+            if (net_mode) {
+                /* Requeue OK button -- bounds must match the click hit-test above. */
+                glColor3f(0.15f, 0.35f, 0.2f);
+                glBegin(GL_QUADS);
+                glVertex2f(win_w / 2.0f - 90, win_h / 2.0f - 70);
+                glVertex2f(win_w / 2.0f + 90, win_h / 2.0f - 70);
+                glVertex2f(win_w / 2.0f + 90, win_h / 2.0f - 30);
+                glVertex2f(win_w / 2.0f - 90, win_h / 2.0f - 30);
+                glEnd();
+                glColor3f(0.6f, 1.0f, 0.7f);
+                draw_string("OK - REQUEUE", win_w / 2.0f - 78, win_h / 2.0f - 55, 14);
             }
         }
         glEnable(GL_DEPTH_TEST);

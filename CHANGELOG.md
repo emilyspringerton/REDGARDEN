@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-07-24 (29)
+
+- fix(arena): the actual instant "YOU WIN" bug (S170-66) -- three more `#ifndef _WIN32` guards
+  reintroduced by the newer 10v10 networked-PvP code, all in `apps/arena/src/main.c`: the
+  `net_poll_snapshots()` call site, the click-to-move `net_send_move()` call site, and the Q/W/E
+  `net_send_cast()` call site. On Windows (the founder's actual platform) all three silently
+  compiled out -- no error -- so the client fell through to the local single-player practice
+  simulation instead of ever applying real server snapshots, resolving near-instantly and
+  producing a "YOU WIN" completely disconnected from the real networked match. `grep -n "#ifndef
+  _WIN32"` now returns zero hits in this file; every remaining guard is a correctly-scoped
+  `#ifdef _WIN32` around an actual platform difference. Second real blocker found + fixed in the
+  same pass: `redgarden-bot-pool.service` (S170-65) launched exactly 20 bots into a
+  `--lobby-size 20` matchmaker, permanently filling the lobby with bots alone -- dropped to 19 so
+  a human always has an open slot. Also added, absorbing part of S170-68's scope per the
+  founder's own real-time narrowing ("terminal launching the client is fine for now" / "auto
+  draft is fine for now"): `net_send_pick()` + auto-draft (sends a `PACKET_ARENA_PICK` the moment
+  `net_phase` reports `ARENA_PHASE_DRAFT`, console-logged) so a match never hangs waiting on a
+  pick that never comes; and a click-to-continue "OK" requeue button on the win/lose screen in
+  net_mode, reusing the same `net_find_and_connect`/`net_connect` path used at startup. Verified:
+  `scripts/build_arena.sh` clean, `scripts/test_arena.sh` all green, and a full local mingw
+  cross-compile (same toolchain/flags as CI) produced a clean 0-warning `RedGarden.exe`.
+
 ## 2026-07-24 (28)
 
 - ops: real systemd units for the arena matchmaker pools + persistent bot pool (S170-65). Founder,

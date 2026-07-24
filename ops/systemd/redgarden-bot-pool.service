@@ -17,7 +17,7 @@
 # one bot briefly to relaunch all 20 is a fine tradeoff against added complexity here.
 
 [Unit]
-Description=REDGARDEN arena persistent bot pool (20 bots -> bot-pool matchmaker :7778)
+Description=REDGARDEN arena persistent bot pool (19 bots + 1 open human slot -> bot-pool matchmaker :7778)
 After=network-online.target redgarden-matchmaker-bots.service
 Wants=redgarden-matchmaker-bots.service
 
@@ -25,7 +25,7 @@ Wants=redgarden-matchmaker-bots.service
 Type=simple
 WorkingDirectory=/home/fatbaby/REDGARDEN
 ExecStartPre=/bin/sleep 2
-ExecStart=/home/fatbaby/REDGARDEN/scripts/run_bot_pool.sh 20
+ExecStart=/home/fatbaby/REDGARDEN/scripts/run_bot_pool.sh 19
 Restart=on-failure
 RestartSec=5s
 StandardOutput=append:/home/fatbaby/REDGARDEN/var/logs/bot-pool.log
