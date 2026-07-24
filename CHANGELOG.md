@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-07-24 (9)
+
+- WOTAN player identity, S170-41: `apps/client/bot_main.c` now tries a real IDUNA register+ticket-mint round trip (falls back to the old self-mint on any failure) instead of always self-minting a fake ticket. Verified live: two bots registered distinct real `player_id`s, connected via the real matchmaker, match log shows real identities on every event. `scripts/test_10_bots.sh` re-verified clean (backward compatible). Companion IDUNA-side change (new `REDGARDEN-BOTS` agent, `player_game_stats` table, `/api/v1/redgarden/{ticket,game-result,leaderboard}` endpoints) landed in the IDUNA repo, verified live end-to-end there too.
+
 ## 2026-07-24 (8)
 
 - NORTHSTAR §12 Phase E (S170-36) started: Milestone-6 equivalent (state serializer + action

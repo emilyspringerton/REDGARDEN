@@ -17,6 +17,7 @@
 
 #include "../../packages/common/protocol.h"
 #include "../../packages/common/hmac_sha256.h"
+#include "../../packages/common/http_client.h"
 
 #define TICKET_PAYLOAD_LEN 20
 #define TICKET_MAC_LEN 16
@@ -69,6 +70,137 @@ static void mint_ticket(const unsigned char *secret, size_t secret_len, unsigned
     memcpy(out + TICKET_PAYLOAD_LEN, mac, TICKET_MAC_LEN);
 }
 
+// ---- WOTAN real identity (EMILY/BACKLOG.md S170-26/41, REDGARDEN
+// NORTHSTAR §12 Phase A) ----
+//
+// The self-mint path above (mint_ticket) is the same known simplification
+// shankpit-460's own reference bot uses: 16 random bytes standing in for a
+// player_id, with no real IDUNA identity behind it at all. This section
+// gives the bot a real one instead: log in as the REDGARDEN-BOTS M2M agent,
+// register a real player (provider=redgarden_bot), and mint a real ticket
+// for that player_id via IDUNA's RedgardenTicketHandler -- the same wire
+// format as mint_ticket produces, just signed by IDUNA server-side for an
+// identity that actually persists in the players/player_game_stats tables,
+// instead of vanishing the moment this process exits.
+//
+// Same IDUNA_BASE_URL/IDUNA_AGENT_NAME/IDUNA_AGENT_SECRET env vars as
+// apps/server/src/main.c's load_iduna_agent_config, so one env setup wires
+// up both the server and its bots.
+static char iduna_host[128] = "127.0.0.1";
+static int iduna_port = 8080;
+static char iduna_agent_name[128] = "";
+static char iduna_agent_secret[256] = "";
+static int iduna_agent_configured = 0;
+
+static void load_iduna_agent_config(void) {
+    const char *base_url = getenv("IDUNA_BASE_URL");
+    if (base_url && base_url[0]) {
+        const char *host_start = base_url;
+        if (strncmp(host_start, "http://", 7) == 0) host_start += 7;
+        else if (strncmp(host_start, "https://", 8) == 0) host_start += 8;
+
+        char host_buf[128];
+        strncpy(host_buf, host_start, sizeof(host_buf) - 1);
+        host_buf[sizeof(host_buf) - 1] = '\0';
+        char *slash = strchr(host_buf, '/');
+        if (slash) *slash = '\0';
+
+        char *colon = strchr(host_buf, ':');
+        int port = iduna_port;
+        if (colon) {
+            port = atoi(colon + 1);
+            *colon = '\0';
+        }
+        strncpy(iduna_host, host_buf, sizeof(iduna_host) - 1);
+        iduna_host[sizeof(iduna_host) - 1] = '\0';
+        if (port > 0) iduna_port = port;
+    }
+
+    const char *name = getenv("IDUNA_AGENT_NAME");
+    const char *secret = getenv("IDUNA_AGENT_SECRET");
+    if (name && name[0] && secret && secret[0]) {
+        strncpy(iduna_agent_name, name, sizeof(iduna_agent_name) - 1);
+        iduna_agent_name[sizeof(iduna_agent_name) - 1] = '\0';
+        strncpy(iduna_agent_secret, secret, sizeof(iduna_agent_secret) - 1);
+        iduna_agent_secret[sizeof(iduna_agent_secret) - 1] = '\0';
+        iduna_agent_configured = 1;
+    }
+}
+
+static int hex_decode(const char *hex, unsigned char *out, size_t out_len) {
+    size_t hexlen = strlen(hex);
+    if (hexlen != out_len * 2) return 0;
+    for (size_t i = 0; i < out_len; i++) {
+        unsigned int byte;
+        if (sscanf(hex + i * 2, "%2x", &byte) != 1) return 0;
+        out[i] = (unsigned char)byte;
+    }
+    return 1;
+}
+
+// get_real_wotan_ticket does the full agent-login -> register -> mint-ticket
+// round trip over HTTP. Returns 1 and fills out[TICKET_TOTAL_LEN] on
+// success; returns 0 on any failure (network error, unexpected status,
+// missing JSON field) so the caller can fall back to the self-mint path
+// rather than crash or hang a headless test run on a transient IDUNA issue.
+static int get_real_wotan_ticket(unsigned char out[TICKET_TOTAL_LEN]) {
+    char resp[4096];
+    int status = 0;
+
+    char login_body[512];
+    snprintf(login_body, sizeof(login_body),
+             "{\"agent_name\":\"%s\",\"agent_secret\":\"%s\"}",
+             iduna_agent_name, iduna_agent_secret);
+    if (http_post_json(iduna_host, iduna_port, "/api/v1/auth/agent", NULL,
+                        login_body, resp, sizeof(resp), &status) != 0 || status != 200) {
+        fprintf(stderr, "[bot] WOTAN: agent login failed (status=%d)\n", status);
+        return 0;
+    }
+    char token[2048];
+    if (!http_extract_json_string_field(resp, "access_token", token, sizeof(token))) {
+        fprintf(stderr, "[bot] WOTAN: agent login response missing access_token\n");
+        return 0;
+    }
+
+    char provider_sub[64];
+    snprintf(provider_sub, sizeof(provider_sub), "bot-%d-%u",
+             (int)getpid(), (unsigned int)time(NULL));
+    char register_body[256];
+    snprintf(register_body, sizeof(register_body),
+             "{\"provider\":\"redgarden_bot\",\"provider_sub\":\"%s\"}", provider_sub);
+    if (http_post_json(iduna_host, iduna_port, "/api/v1/players/register", token,
+                        register_body, resp, sizeof(resp), &status) != 0 || status != 200) {
+        fprintf(stderr, "[bot] WOTAN: player registration failed (status=%d)\n", status);
+        return 0;
+    }
+    char player_id[64];
+    if (!http_extract_json_string_field(resp, "player_id", player_id, sizeof(player_id))) {
+        fprintf(stderr, "[bot] WOTAN: registration response missing player_id\n");
+        return 0;
+    }
+
+    char ticket_body[128];
+    snprintf(ticket_body, sizeof(ticket_body), "{\"player_id\":\"%s\"}", player_id);
+    if (http_post_json(iduna_host, iduna_port, "/api/v1/redgarden/ticket", token,
+                        ticket_body, resp, sizeof(resp), &status) != 0 || status != 200) {
+        fprintf(stderr, "[bot] WOTAN: ticket mint failed (status=%d)\n", status);
+        return 0;
+    }
+    char ticket_hex[128];
+    if (!http_extract_json_string_field(resp, "ticket", ticket_hex, sizeof(ticket_hex))) {
+        fprintf(stderr, "[bot] WOTAN: ticket response missing ticket field\n");
+        return 0;
+    }
+    if (!hex_decode(ticket_hex, out, TICKET_TOTAL_LEN)) {
+        fprintf(stderr, "[bot] WOTAN: ticket field was not valid %d-byte hex\n", TICKET_TOTAL_LEN);
+        return 0;
+    }
+
+    printf("[bot %d] WOTAN: real identity registered -- player_id=%s provider_sub=%s\n",
+           (int)getpid(), player_id, provider_sub);
+    return 1;
+}
+
 static void send_find_match(struct sockaddr_in *matchmaker_addr) {
     NetHeader h = {0};
     h.type = PACKET_FIND_MATCH;
@@ -105,12 +237,12 @@ static int wait_for_match(struct sockaddr_in *matchmaker_addr) {
     }
 }
 
-static void send_connect_with_ticket(const unsigned char *secret, size_t secret_len) {
+static void send_connect_with_ticket(const unsigned char ticket[TICKET_TOTAL_LEN]) {
     char buffer[sizeof(NetHeader) + TICKET_TOTAL_LEN];
     NetHeader *h = (NetHeader *)buffer;
     memset(h, 0, sizeof(NetHeader));
     h->type = PACKET_CONNECT;
-    mint_ticket(secret, secret_len, (unsigned char *)(buffer + sizeof(NetHeader)));
+    memcpy(buffer + sizeof(NetHeader), ticket, TICKET_TOTAL_LEN);
     sendto(sock, buffer, sizeof(buffer), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
 }
 
@@ -155,6 +287,26 @@ int main(int argc, char *argv[]) {
     srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
     open_socket();
 
+    load_iduna_agent_config();
+
+    // WOTAN real identity (S170-26/41): try the real register+mint flow
+    // first when IDUNA is configured; fall back to the local self-mint
+    // (same known-simplification path as shankpit-460's own reference bot)
+    // on any failure, so a transient IDUNA hiccup can't hang or crash a
+    // headless test run.
+    unsigned char ticket[TICKET_TOTAL_LEN];
+    int have_ticket = 0;
+    if (iduna_agent_configured) {
+        have_ticket = get_real_wotan_ticket(ticket);
+        if (!have_ticket) {
+            fprintf(stderr, "[bot %d] WOTAN: falling back to self-minted ticket (no real identity)\n",
+                    (int)getpid());
+        }
+    }
+    if (!have_ticket) {
+        mint_ticket((const unsigned char *)ticket_secret, strlen(ticket_secret), ticket);
+    }
+
     int game_port = direct_port;
     if (game_port == 0) {
         struct sockaddr_in matchmaker_addr;
@@ -166,7 +318,7 @@ int main(int argc, char *argv[]) {
     }
 
     init_network_to(&server_addr, ip, game_port);
-    send_connect_with_ticket((const unsigned char *)ticket_secret, strlen(ticket_secret));
+    send_connect_with_ticket(ticket);
 
     int tick = 0;
     while (1) {

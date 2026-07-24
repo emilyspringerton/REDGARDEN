@@ -361,13 +361,36 @@ prerequisite Phase B needs to key replay events to a real player, not a slot ind
 config loading (`IDUNA_BASE_URL`/`IDUNA_AGENT_NAME`/`IDUNA_AGENT_SECRET`), matching shankpit-460's
 pattern exactly.
 
-**Deliberately not done yet — a real fork, not an oversight.** shankpit-460 reports FPS
-`kills`/`deaths` to IDUNA's `/api/v1/players/{id}/session` endpoint; that schema is FPS-specific.
-REDGARDEN is a card-RTS with a `match_winner` field (win/loss), not kills/deaths — forcing one
-into the other's columns would corrupt shared WOTAN profile semantics across every game using that
-table. Reporting REDGARDEN results into IDUNA needs either a genre-agnostic schema addition
-(`wins`/`losses`/`matches_played` columns) or a separate endpoint. That's a real IDUNA schema
-decision, flagged here rather than guessed past — see `EMILY/BACKLOG.md` S170-26.
+**Schema decision resolved, 2026-07-24 (S170-41).** shankpit-460 reports FPS `kills`/`deaths` to
+IDUNA's `/api/v1/players/{id}/session`; forcing REDGARDEN's `match_winner` (win/loss) into those
+columns would have corrupted shared WOTAN profile semantics. Went with the separate-endpoint path:
+IDUNA gained a genre-agnostic `player_game_stats` table (`player_id`, `game`, `wins`, `losses`,
+`matches_played`) plus three new endpoints — `POST /api/v1/redgarden/ticket` (mints a connect
+ticket on behalf of an already-registered `player_id`, gated by a new `redgarden.ticket.mint`
+permission — REDGARDEN bots have no OAuth login, so unlike shankpit's ticket handler this mints on
+behalf of a caller-supplied player_id rather than the caller's own, restricted to
+`provider=redgarden_bot` rows so it can never mint a ticket impersonating a real human), `POST
+/api/v1/redgarden/game-result` (`redgarden.match.write`, same trust model as
+`shankpit.match.write`), and a public `GET /api/v1/redgarden/leaderboard`. New M2M agent
+`REDGARDEN-BOTS` provisioned (mirrors `SHANKPIT460-SERVER` exactly). Verified live end-to-end, not
+just unit tests: agent-login → register a real player → mint a real ticket → the ticket verified
+against the actual C `hmac_sha256.h`/`verify_connect_ticket` code → posted match results → read
+back off the public leaderboard.
+
+**Bots now carry real WOTAN identities, 2026-07-24 (S170-41).** `apps/client/bot_main.c` tries the
+real register+mint round trip first (same `IDUNA_BASE_URL`/`IDUNA_AGENT_NAME`/`IDUNA_AGENT_SECRET`
+env vars `apps/server` already loads) and falls back to the old self-minted ticket (shankpit-460's
+own known emily-bot simplification) on any failure, so a transient IDUNA hiccup can't hang a
+headless test run. Verified live: two bots each registered distinct, real, persistent `player_id`s,
+connected through the real matchmaker, and the match log shows real WOTAN identities on every
+`connect`/`card_play` event instead of random bytes. `scripts/test_10_bots.sh` re-run clean
+afterward (10 bots, 5 matches, self-mint fallback path since that script doesn't set the IDUNA env
+vars) — confirms the change is backward compatible, not just additive in isolation.
+
+**Still not done — `apps/server` reporting match results at match end.** The server has everything
+it needs now (real per-client `player_id`s captured at connect, the game-result endpoint exists),
+but wiring `match_end` to actually call it is separate, deliberately-deferred work, not silently
+folded into this pass.
 
 **Phase B — Replay logging. Started 2026-07-24 (S170-28).** Extends §10's already-specified
 minimum hook (`red_garden_server` per-match `var/matches/<port>-<timestamp>.jsonl` event log) to
