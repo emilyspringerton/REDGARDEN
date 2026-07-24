@@ -431,6 +431,14 @@ int main(int argc, char *argv[]) {
                 arena_init();
                 memset(rings, 0, sizeof(rings));
             }
+            /* The Unicorn's kit (docs/HEROES_VS0.md) — player hero (owner 0) only,
+             * S170-18. R is already bound to "restart match" in this demo, so the
+             * ultimate goes on E rather than colliding with it. */
+            if (e.type == SDL_KEYDOWN && arena_state.winner == 0) {
+                if (e.key.keysym.sym == SDLK_q) arena_cast_q(0);
+                if (e.key.keysym.sym == SDLK_w) arena_toggle_w(0);
+                if (e.key.keysym.sym == SDLK_e) arena_cast_r(0);
+            }
         }
 
         if (arena_state.winner == 0) {
@@ -553,6 +561,22 @@ int main(int argc, char *argv[]) {
             glVertex2f(90, win_h - 68.0f); glVertex2f(90 + 200 * frac, win_h - 68.0f);
             glVertex2f(90 + 200 * frac, win_h - 50.0f); glVertex2f(90, win_h - 50.0f);
             glEnd();
+        }
+
+        {
+            /* Unicorn kit status (docs/HEROES_VS0.md) — Q/W/E readiness. */
+            ArenaHero *h = &arena_state.heroes[0];
+            char qbuf[24], wbuf[24], ebuf[24];
+            snprintf(qbuf, sizeof(qbuf), "Q %s", h->q_cooldown_ms > 0 ? "CD" : "READY");
+            snprintf(wbuf, sizeof(wbuf), "W %s", h->w_active ? "ON" : "OFF");
+            snprintf(ebuf, sizeof(ebuf), "E %s%s", h->r_cooldown_ms > 0 ? "CD" : "READY",
+                     h->r_active_ms > 0 ? " (ACTIVE)" : "");
+            glColor3f(h->q_cooldown_ms > 0 ? 0.5f : 0.2f, h->q_cooldown_ms > 0 ? 0.5f : 1.0f, 0.9f);
+            draw_string(qbuf, 20, win_h - 95.0f, 12);
+            glColor3f(h->w_active ? 0.2f : 0.6f, h->w_active ? 1.0f : 0.6f, 0.3f);
+            draw_string(wbuf, 120, win_h - 95.0f, 12);
+            glColor3f(h->r_cooldown_ms > 0 ? 0.5f : 0.9f, 0.4f, h->r_cooldown_ms > 0 ? 0.5f : 0.9f);
+            draw_string(ebuf, 220, win_h - 95.0f, 12);
         }
 
         if (arena_state.winner == 1) {

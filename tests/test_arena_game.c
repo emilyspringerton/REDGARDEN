@@ -94,6 +94,71 @@ static void test_click_near_enemy_becomes_attack_move(void) {
           "clicking near the bot re-targets onto the bot (attack-move), not the exact click point");
 }
 
+/* --- The Unicorn's kit (docs/HEROES_VS0.md, EMILY/BACKLOG.md S170-18) --- */
+
+static void test_unicorn_q_dashes_and_damages(void) {
+    arena_init();
+    ArenaHero *h = &arena_state.heroes[0];
+    ArenaHero *foe = &arena_state.heroes[1];
+    float start_x = h->x;
+    /* Move the foe adjacent to where the dash will land, in the direction
+       of the hero's current move target, so the hit-radius check succeeds. */
+    arena_set_move_target(0, h->x + 4.0f, h->z);
+    foe->x = h->x + ARENA_UNICORN_Q_DASH_DIST;
+    foe->z = h->z;
+    int foe_hp_before = foe->hp;
+
+    arena_cast_q(0);
+
+    CHECK(h->x > start_x, "Q dashes the hero forward");
+    CHECK(foe->hp < foe_hp_before, "Q damages the foe when the dash lands in range");
+    CHECK(h->q_cooldown_ms == ARENA_UNICORN_Q_COOLDOWN_MS, "Q starts on cooldown after cast");
+}
+
+static void test_unicorn_q_respects_cooldown(void) {
+    arena_init();
+    ArenaHero *h = &arena_state.heroes[0];
+    arena_set_move_target(0, h->x + 4.0f, h->z);
+    arena_cast_q(0);
+    float x_after_first = h->x;
+    arena_cast_q(0); /* should no-op, still on cooldown */
+    CHECK(h->x == x_after_first, "Q does not re-cast while on cooldown");
+}
+
+static void test_unicorn_w_regen_toggle(void) {
+    arena_init();
+    ArenaHero *h = &arena_state.heroes[0];
+    h->hp = 50; /* below max so regen has room to matter */
+    arena_toggle_w(0);
+    CHECK(h->w_active == 1, "W toggles on");
+    arena_update(1000); /* 1 second of regen */
+    CHECK(h->hp > 50, "W regenerates HP while active");
+    arena_toggle_w(0);
+    CHECK(h->w_active == 0, "W toggles back off");
+}
+
+static void test_unicorn_r_doubles_armor_temporarily(void) {
+    arena_init();
+    ArenaHero *h = &arena_state.heroes[0];
+    float base_armor = arena_hero_armor(h);
+    arena_cast_r(0);
+    CHECK(arena_hero_armor(h) == base_armor * 2.0f, "R doubles armor while active");
+    CHECK(h->r_cooldown_ms == ARENA_UNICORN_R_COOLDOWN_MS, "R starts on cooldown after cast");
+    /* Advance past the buff's duration but not its cooldown. */
+    arena_update(ARENA_UNICORN_R_DURATION_MS + 100);
+    CHECK(arena_hero_armor(h) == base_armor, "R's armor buff expires after its duration");
+}
+
+static void test_unicorn_armor_reduces_incoming_damage(void) {
+    arena_init();
+    ArenaHero *h = &arena_state.heroes[0];
+    ArenaHero *bot = &arena_state.heroes[1];
+    /* Bot only has plain melee (S170-18 scope) -- confirm the hero's armor
+       actually reduces what it takes, not just that armor is nonzero. */
+    CHECK(arena_hero_armor(h) > 0.0f, "The Unicorn has nonzero passive armor");
+    CHECK(arena_hero_armor(bot) == 0.0f, "the bot has no armor this pass -- plain melee only");
+}
+
 int main(void) {
     printf("RED GARDEN arena_game headless smoke test\n\n");
     test_movement_reaches_target();
@@ -101,6 +166,11 @@ int main(void) {
     test_combat_and_win_condition();
     test_bot_steers_toward_player();
     test_click_near_enemy_becomes_attack_move();
+    test_unicorn_q_dashes_and_damages();
+    test_unicorn_q_respects_cooldown();
+    test_unicorn_w_regen_toggle();
+    test_unicorn_r_doubles_armor_temporarily();
+    test_unicorn_armor_reduces_incoming_damage();
     printf("\n%s\n", failures == 0 ? "ALL PASS" : "SOME FAILED");
     return failures == 0 ? 0 : 1;
 }

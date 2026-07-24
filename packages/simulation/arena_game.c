@@ -138,6 +138,21 @@ static void update_hero_motion(ArenaHero *h, float dt_sec) {
     }
 }
 
+/* arena_hero_armor: effective armor including Full Disclosure's temporary
+ * double. Only owner 0 (The Unicorn) has any armor this pass -- the bot
+ * (owner 1) stays plain melee, per S170-18's scope. */
+float arena_hero_armor(const ArenaHero *h) {
+    if (h->owner != 0) return 0.0f;
+    float armor = (float)ARENA_UNICORN_ARMOR;
+    if (h->r_active_ms > 0) armor *= 2.0f;
+    return armor;
+}
+
+static int apply_armor(int raw_damage, float armor) {
+    int dmg = raw_damage - (int)armor;
+    return dmg < 1 ? 1 : dmg;
+}
+
 static void resolve_combat(unsigned int dt_ms) {
     ArenaHero *a = &arena_state.heroes[0];
     ArenaHero *b = &arena_state.heroes[1];
@@ -151,15 +166,88 @@ static void resolve_combat(unsigned int dt_ms) {
     if (dist > ARENA_ATTACK_RANGE) return;
 
     if (a->attack_cooldown_ms <= 0) {
-        b->hp -= ARENA_ATTACK_DAMAGE;
+        b->hp -= apply_armor(ARENA_ATTACK_DAMAGE, arena_hero_armor(b));
         a->attack_cooldown_ms = ARENA_ATTACK_COOLDOWN_MS;
     }
     if (b->attack_cooldown_ms <= 0) {
-        a->hp -= ARENA_ATTACK_DAMAGE;
+        a->hp -= apply_armor(ARENA_ATTACK_DAMAGE, arena_hero_armor(a));
         b->attack_cooldown_ms = ARENA_ATTACK_COOLDOWN_MS;
     }
     if (a->hp <= 0) { a->hp = 0; a->alive = 0; }
     if (b->hp <= 0) { b->hp = 0; b->alive = 0; }
+}
+
+/* --- The Unicorn's kit --- */
+
+void arena_cast_q(int owner) {
+    if (owner != 0) return; /* bot doesn't have this kit yet, S170-18 */
+    ArenaHero *h = &arena_state.heroes[owner];
+    ArenaHero *foe = &arena_state.heroes[owner == 0 ? 1 : 0];
+    if (!h->alive || h->q_cooldown_ms > 0) return;
+
+    /* Dash toward the current move target if moving, else toward the foe --
+       a dash ability needs a direction, and "toward whatever you last
+       clicked, or the enemy if you didn't" is the simplest honest default. */
+    float dx, dz;
+    if (h->moving) {
+        dx = h->target_x - h->x;
+        dz = h->target_z - h->z;
+    } else {
+        dx = foe->x - h->x;
+        dz = foe->z - h->z;
+    }
+    float len = sqrtf(dx * dx + dz * dz);
+    if (len < 0.01f) return; /* no meaningful direction, e.g. already on top of foe */
+    dx /= len; dz /= len;
+
+    float nx = h->x + dx * ARENA_UNICORN_Q_DASH_DIST;
+    float nz = h->z + dz * ARENA_UNICORN_Q_DASH_DIST;
+    if (nx < -ARENA_HALF_EXTENT) nx = -ARENA_HALF_EXTENT;
+    if (nx > ARENA_HALF_EXTENT) nx = ARENA_HALF_EXTENT;
+    if (nz < -ARENA_HALF_EXTENT) nz = -ARENA_HALF_EXTENT;
+    if (nz > ARENA_HALF_EXTENT) nz = ARENA_HALF_EXTENT;
+    h->x = nx;
+    h->z = nz;
+    h->moving = 0;
+
+    if (foe->alive) {
+        float fdx = foe->x - h->x, fdz = foe->z - h->z;
+        if (sqrtf(fdx * fdx + fdz * fdz) <= ARENA_UNICORN_Q_HIT_RADIUS) {
+            foe->hp -= apply_armor(ARENA_UNICORN_Q_DAMAGE, arena_hero_armor(foe));
+            if (foe->hp <= 0) { foe->hp = 0; foe->alive = 0; }
+        }
+    }
+    h->q_cooldown_ms = ARENA_UNICORN_Q_COOLDOWN_MS;
+}
+
+void arena_toggle_w(int owner) {
+    if (owner != 0) return;
+    ArenaHero *h = &arena_state.heroes[owner];
+    if (!h->alive) return;
+    h->w_active = !h->w_active;
+}
+
+void arena_cast_r(int owner) {
+    if (owner != 0) return;
+    ArenaHero *h = &arena_state.heroes[owner];
+    if (!h->alive || h->r_cooldown_ms > 0) return;
+    h->r_active_ms = ARENA_UNICORN_R_DURATION_MS;
+    h->r_cooldown_ms = ARENA_UNICORN_R_COOLDOWN_MS;
+}
+
+static void tick_unicorn_kit(ArenaHero *h, unsigned int dt_ms) {
+    if (h->owner != 0) return;
+    if (h->q_cooldown_ms > 0) h->q_cooldown_ms -= (int)dt_ms;
+    if (h->r_cooldown_ms > 0) h->r_cooldown_ms -= (int)dt_ms;
+    if (h->r_active_ms > 0) {
+        h->r_active_ms -= (int)dt_ms;
+        if (h->r_active_ms < 0) h->r_active_ms = 0;
+    }
+    if (h->w_active && h->alive) {
+        float regen = ARENA_UNICORN_W_REGEN_PER_SEC * ((float)dt_ms / 1000.0f);
+        h->hp += (int)regen;
+        if (h->hp > h->max_hp) h->hp = h->max_hp;
+    }
 }
 
 void arena_update(unsigned int dt_ms) {
@@ -187,6 +275,7 @@ void arena_update(unsigned int dt_ms) {
     update_hero_motion(&arena_state.heroes[0], dt_sec);
     update_hero_motion(&arena_state.heroes[1], dt_sec);
     resolve_combat(dt_ms);
+    tick_unicorn_kit(&arena_state.heroes[0], dt_ms);
 
     if (!arena_state.heroes[0].alive) arena_state.winner = 2;
     else if (!arena_state.heroes[1].alive) arena_state.winner = 1;
