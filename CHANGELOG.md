@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-07-24 (34)
+
+- fix(arena): "ENEMY" HUD readout was a hardcoded 1v1 assumption, broken in team mode (S170-86
+  investigation, real bug found). `heroes[1 - my_owner]` only ever made sense for exactly 2
+  heroes -- in a 20-hero team match it either mislabels a teammate as ENEMY (`heroes[1]` is
+  always team 0, same team as `heroes[0]`, whenever `my_owner==0`) or reads a negative
+  out-of-bounds index for any `my_owner > 1`. Replaced with `arena_nearest_enemy(my_owner)` in
+  net_mode, the same team-aware lookup the server already uses -- local 1v1 mode keeps the
+  original behavior unchanged.
+- feat(arena): per-hero floating health bars (S170-89). New `world_to_screen()` projects a world
+  point through the same view-projection matrix the 3D pass draws with, into the 2D HUD's pixel
+  space. Every alive hero now gets a small billboarded bar above them, colored by relationship
+  (cyan = you, blue = teammate, red = enemy) -- not just the two fixed YOU/nearest-enemy bars,
+  which never showed anything for the other 18 heroes in a real team match. Verified:
+  build_arena.sh, test_arena.sh, and a local mingw cross-compile, all clean.
+
 ## 2026-07-24 (33)
 
 - fix(ci): hard timeout ceilings after a real hung build. Founder: "we have a hung build for the

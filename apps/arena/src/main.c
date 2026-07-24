@@ -810,6 +810,28 @@ static int screen_to_ground(int mx, int my, int w, int h, float fov_deg,
     return 1;
 }
 
+/* world_to_screen: inverse of screen_to_ground's job -- projects a 3D world point through
+ * the same view-projection matrix the 3D pass draws with, into the 2D HUD's bottom-up pixel
+ * space (S170-89, per-hero floating health bars). Mat4 is column-major (mat4.h's own
+ * mat4_multiply indexes m[col*4+row]), so the manual point transform below follows the same
+ * convention. Returns 0 if the point is behind the camera (w <= 0), meaningless to project. */
+static int world_to_screen(const Mat4 *vp, float wx, float wy, float wz, int win_w, int win_h,
+                            float *sx, float *sy) {
+    float px[4] = {wx, wy, wz, 1.0f};
+    float clip[4];
+    for (int row = 0; row < 4; row++) {
+        float sum = 0.0f;
+        for (int col = 0; col < 4; col++) sum += vp->m[col * 4 + row] * px[col];
+        clip[row] = sum;
+    }
+    if (clip[3] <= 0.01f) return 0;
+    float ndc_x = clip[0] / clip[3];
+    float ndc_y = clip[1] / clip[3];
+    *sx = (ndc_x * 0.5f + 0.5f) * win_w;
+    *sy = (ndc_y * 0.5f + 0.5f) * win_h;
+    return 1;
+}
+
 int main(int argc, char *argv[]) {
     /* Observer mode (NORTHSTAR §12 Phase C, EMILY/BACKLOG.md S170-30):
      * `red_garden_arena --observe var/matches/arena-<ts>.jsonl` plays back
@@ -1152,6 +1174,32 @@ int main(int argc, char *argv[]) {
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
 
+        /* Per-hero floating health bars (S170-89: "health bar hovers over hero") -- every
+           alive hero, not just YOU/nearest-enemy's fixed HUD bars, so a 20-hero team match
+           actually shows damage landing on whoever's in view. Reuses the same vp matrix the
+           3D pass just drew with, projected into this 2D HUD's pixel space. */
+        for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+            ArenaHero *h = &arena_state.heroes[i];
+            if (!h->alive) continue;
+            float sx, sy;
+            if (!world_to_screen(&vp, h->x, 1.6f, h->z, win_w, win_h, &sx, &sy)) continue;
+            if (sx < -40 || sx > win_w + 40 || sy < -20 || sy > win_h + 20) continue;
+            float frac = h->max_hp > 0 ? (float)h->hp / h->max_hp : 0.0f;
+            float bw = 40.0f, bh = 5.0f;
+            glColor3f(0.1f, 0.1f, 0.1f);
+            glBegin(GL_QUADS);
+            glVertex2f(sx - bw / 2, sy); glVertex2f(sx + bw / 2, sy);
+            glVertex2f(sx + bw / 2, sy + bh); glVertex2f(sx - bw / 2, sy + bh);
+            glEnd();
+            if (i == my_owner) glColor3f(0.1f, 0.8f, 0.95f);
+            else if (h->team == arena_state.heroes[my_owner].team) glColor3f(0.15f, 0.55f, 0.95f);
+            else glColor3f(0.9f, 0.25f, 0.15f);
+            glBegin(GL_QUADS);
+            glVertex2f(sx - bw / 2, sy); glVertex2f(sx - bw / 2 + bw * frac, sy);
+            glVertex2f(sx - bw / 2 + bw * frac, sy + bh); glVertex2f(sx - bw / 2, sy + bh);
+            glEnd();
+        }
+
         glColor3f(0.1f, 0.8f, 0.95f);
         draw_string("YOU", 20, win_h - 40.0f, 14);
         glColor3f(1.0f, 1.0f, 1.0f);
@@ -1170,20 +1218,27 @@ int main(int argc, char *argv[]) {
             glEnd();
         }
         glColor3f(0.95f, 0.25f, 0.15f);
-        draw_string(net_mode ? "ENEMY" : "BOT", 20, win_h - 70.0f, 14);
+        draw_string(net_mode ? "NEAREST ENEMY" : "BOT", 20, win_h - 70.0f, 14);
         {
-            ArenaHero *h = &arena_state.heroes[1 - my_owner];
-            float frac = (float)h->hp / h->max_hp;
-            glColor3f(0.2f, 0.2f, 0.2f);
-            glBegin(GL_QUADS);
-            glVertex2f(90, win_h - 68.0f); glVertex2f(290, win_h - 68.0f);
-            glVertex2f(290, win_h - 50.0f); glVertex2f(90, win_h - 50.0f);
-            glEnd();
-            glColor3f(0.9f, 0.3f, 0.1f);
-            glBegin(GL_QUADS);
-            glVertex2f(90, win_h - 68.0f); glVertex2f(90 + 200 * frac, win_h - 68.0f);
-            glVertex2f(90 + 200 * frac, win_h - 50.0f); glVertex2f(90, win_h - 50.0f);
-            glEnd();
+            /* heroes[1 - my_owner] only ever made sense for exactly 2 heroes (1v1) -- in
+               team mode (S170-79 finding, real bug, not cosmetic) it either mislabels a
+               teammate as ENEMY (heroes[1] is always team 0 same as heroes[0] for
+               my_owner==0) or reads a negative out-of-bounds index for any my_owner > 1.
+               arena_nearest_enemy() is the real team-aware lookup already used server-side. */
+            ArenaHero *h = net_mode ? arena_nearest_enemy(my_owner) : &arena_state.heroes[1 - my_owner];
+            if (h) {
+                float frac = (float)h->hp / h->max_hp;
+                glColor3f(0.2f, 0.2f, 0.2f);
+                glBegin(GL_QUADS);
+                glVertex2f(90, win_h - 68.0f); glVertex2f(290, win_h - 68.0f);
+                glVertex2f(290, win_h - 50.0f); glVertex2f(90, win_h - 50.0f);
+                glEnd();
+                glColor3f(0.9f, 0.3f, 0.1f);
+                glBegin(GL_QUADS);
+                glVertex2f(90, win_h - 68.0f); glVertex2f(90 + 200 * frac, win_h - 68.0f);
+                glVertex2f(90 + 200 * frac, win_h - 50.0f); glVertex2f(90, win_h - 50.0f);
+                glEnd();
+            }
         }
 
         {
