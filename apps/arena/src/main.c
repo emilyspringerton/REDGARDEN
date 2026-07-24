@@ -18,12 +18,17 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#ifndef _WIN32
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <fcntl.h>
+#ifdef _WIN32
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #include <windows.h>
+    #pragma comment(lib, "ws2_32.lib")
+#else
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <unistd.h>
+    #include <fcntl.h>
 #endif
 
 #include "../../../packages/common/mat4.h"
@@ -175,8 +180,12 @@ static void mint_ticket_fallback(const char *secret, unsigned char out[ARENA_TIC
 
 static int net_connect(const char *host, int port) {
     net_sock = socket(AF_INET, SOCK_DGRAM, 0);
+#ifdef _WIN32
+    u_long mode = 1; ioctlsocket(net_sock, FIONBIO, &mode);
+#else
     int flags = fcntl(net_sock, F_GETFL, 0);
     fcntl(net_sock, F_SETFL, flags | O_NONBLOCK);
+#endif
 
     net_server_addr.sin_family = AF_INET;
     net_server_addr.sin_port = htons((uint16_t)port);
@@ -237,8 +246,12 @@ static int net_connect(const char *host, int port) {
  * "the human will join the bot games to validate, bot-first feedback loop"). */
 static int net_find_and_connect(const char *mm_host, int mm_port) {
     net_sock = socket(AF_INET, SOCK_DGRAM, 0);
+#ifdef _WIN32
+    u_long mode = 1; ioctlsocket(net_sock, FIONBIO, &mode);
+#else
     int flags = fcntl(net_sock, F_GETFL, 0);
     fcntl(net_sock, F_SETFL, flags | O_NONBLOCK);
+#endif
 
     struct sockaddr_in mm_addr = {0};
     mm_addr.sin_family = AF_INET;
@@ -279,7 +292,11 @@ static int net_find_and_connect(const char *mm_host, int mm_port) {
     }
     printf("Match found on port %d -- connecting...\n", game_port);
     /* net_connect opens its own fresh socket; close the queue socket first. */
+#ifdef _WIN32
+    closesocket(net_sock);
+#else
     close(net_sock);
+#endif
     net_sock = -1;
     return net_connect(mm_host, game_port);
 }
@@ -761,7 +778,17 @@ int main(int argc, char *argv[]) {
             queue_port = atoi(argv[++i]);
         }
     }
-#ifndef _WIN32
+#ifdef _WIN32
+    /* Sockets need WSAStartup before any socket() call on Windows -- only
+       needed if this run actually uses the network (--connect/--queue),
+       same "only pay for what you use" reasoning as everywhere else in
+       this file. Harmless to call unconditionally, but scoped here to
+       keep it next to what actually needs it. */
+    if (connect_host || queue_host) {
+        WSADATA wsa;
+        WSAStartup(MAKEWORD(2, 2), &wsa);
+    }
+#endif
     if (connect_host) {
         net_mode = 1;
         load_iduna_agent_config();
@@ -777,12 +804,6 @@ int main(int argc, char *argv[]) {
             return 1;
         }
     }
-#else
-    if (connect_host || queue_host) {
-        fprintf(stderr, "--connect/--queue are not supported on Windows builds yet.\n");
-        return 1;
-    }
-#endif
 
     SDL_Init(SDL_INIT_VIDEO);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);

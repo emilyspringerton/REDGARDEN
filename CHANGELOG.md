@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-07-24 (23)
+
+- fix(arena): real Windows portability for `apps/arena/src/main.c`'s networking, found by
+  actually watching the S170-54 CI run fail rather than trusting the workflow blind. Root cause:
+  the file's `#ifndef _WIN32` guard around POSIX socket headers had no matching `#ifdef _WIN32`
+  branch including `winsock2.h`/`ws2tcpip.h` at all -- so under MinGW, `sockaddr_in`/`AF_INET`/
+  `SOCK_DGRAM` etc. were simply undeclared. Fixed to match `apps/server/src/main.c`'s already-
+  correct pattern exactly: `winsock2.h`/`ws2tcpip.h`/`windows.h` + `#pragma comment(lib,
+  "ws2_32.lib")` on Windows, the POSIX headers on everything else. Also fixed `fcntl(F_SETFL,
+  O_NONBLOCK)` (POSIX-only) → `ioctlsocket(FIONBIO)` on Windows at both non-blocking-socket call
+  sites, `close()` → `closesocket()`, and added the `WSAStartup` call Windows sockets need before
+  first use. Along the way, found `--connect`/`--queue` were explicitly stubbed out on Windows
+  builds entirely ("not supported... yet") -- now that the underlying networking actually
+  compiles correctly cross-platform, enabled it for real rather than leaving the stub in place
+  once its excuse was fixed. Verified: `scripts/build_arena.sh` (Linux) and the full
+  `scripts/test_arena.sh`/`test_10_bots.sh` suites still green; the actual Windows cross-compile
+  is CI-verified on push (still no `mingw-w64` locally, no sudo here).
+
 ## 2026-07-24 (22)
 
 - fix(ci): `.github/workflows/ci.yml` rebuilt to produce a distributable artifact (S170-54).
