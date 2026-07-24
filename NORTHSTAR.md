@@ -338,3 +338,57 @@ plus the founder's cooking (mid-match, resources → cooked buffs) and crafting 
 → items alongside the direct-purchase roster) direction. Neither is mechanically designed or
 implemented yet — captured so later passes on the item roster or the resource economy don't design
 against it by accident.
+
+## 12. Full roster, replays/observer-mode, WOTAN, and a Game AI northstar (2026-07-24)
+
+Northstar only — nothing in this section is built. Picks up directly from §10 (which already
+predicted this moment: "when replays/ML-training/esports work actually starts, there's already a
+real corpus of match data to build against"). Phased, per founder direction ("not all at once
+obviously in phases"):
+
+**Phase A — WOTAN player identity (prerequisite, not parallel).** Founder's own dependency
+reasoning: "how can we find replays if we don't have players on wotan ya know?" A replay is only
+useful once it's attributable to someone — WOTAN (`okemily.com/tournaments.html`'s existing
+product, not a new one) needs a real player-stats/identity surface before replays are worth
+watching, not after. This phase must land before Phase B is worth anything, not just before it.
+
+**Phase B — Replay logging.** Extends §10's already-specified minimum hook (`red_garden_server`
+per-match `var/matches/<port>-<timestamp>.jsonl` event log) to `apps/arena`'s MOBA mode too —
+per-tick hero position/HP/ability-cast snapshots, keyed to the WOTAN player identity from Phase A
+so a replay says *whose* match it is, not just *a* match.
+
+**Phase C — Observer mode, first-class.** Founder: "observer mode is a first class citizen." Not
+a bolted-on debug view — a real client mode that reads Phase B's logs (live-tailing an in-progress
+match, or fully played back after) through the existing renderer, same draw code, no second
+rendering path. "I want to start watching replays asap" is the actual product pressure behind
+this phase; Phase A/B are the real prerequisites standing between here and that, not extra scope
+invented along the way.
+
+**Phase D — Full roster in arena.** Extends S170-18's proof-of-concept (The Unicorn, player-hero-
+only, one kit) to the rest of `docs/HEROES_VS0.md`'s roster, both sides (bot included) — the
+actual "iterate on the MOBA version with the roster" ask, once the integration path S170-18 proved
+is trusted enough to repeat ten more times.
+
+**Phase E — Game AI: reuse existing org tech, don't invent a parallel stack.** Founder: "using the
+full depth breadth and width of einhorn ai tech for games" → "incorporate all of the tech into the
+REDGARDEN bots." A full-repo scan (610 `.md` files, EMILY/BACKLOG.md S170-19) found the pattern to
+extend already written and spec'd: **`gpt2-alpine-c/docs/GAME_AI_NORTHSTAR.md`** (2026-06-18) —
+GPT-2 as a game policy network (serialize state → generate action tokens → decode), with a
+replay-log → fine-tune → self-play flywheel already milestoned end-to-end for SHANKPIT/BedWars.
+REDGARDEN's own bot brain (`packages/simulation/arena_game.c`'s hand-authored feed-forward net,
+explicitly the same shape as `SHANKPIT/packages/simulation/neural_net.h`'s trained one, with its
+own code comment already calling a real training pipeline "a fast-follow") is the same lineage —
+this phase is that fast-follow, applied to REDGARDEN specifically rather than reinvented:
+- Extend `GAME_AI_NORTHSTAR.md`'s state-serializer/action-decoder pattern to REDGARDEN's state
+  (card-hand economy + living grid for the RTS mode, hero/ability state for the MOBA mode) instead
+  of a REDGARDEN-specific format designed from scratch.
+- Phase B's replay logs are the training corpus — the same "no replay data → no fine-tune data"
+  dependency `GAME_AI_NORTHSTAR.md` Milestone 7 already names.
+- **NORN's propose→grade→gate→promote loop kernel** (`pkg/norn`, `EMILY/docs/hq-specs/HQ-SPEC-
+  PRIME-101-norn-loop-kernel.md`) is the natural fit for formally evaluating each bot generation —
+  `GAME_AI_NORTHSTAR.md` Milestone 10's own acceptance criterion ("second-gen bots measurably
+  different from first-gen") is exactly a NORN grading job, not a manual eyeball check. "Bots need
+  personalities that evolve and learn on their previous matches" is this flywheel, named plainly.
+
+Nothing above is built. Each phase depends on the one before it — the sequence is the plan, not
+just the list.
