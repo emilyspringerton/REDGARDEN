@@ -829,3 +829,16 @@ matched into a genuine 1v1 on the player-only pool's own spawned server (port 76
 path. Cross-checked both directions: the player-only matchmaker's log shows only those two human
 connections, ever; grepping every bot's log for the player-only pool's ports (7779/7600) found
 nothing — confirmed clean isolation, not just assumed from the two ports being different.
+
+**S170-14 (3/3): ranked pool — design pass, `docs/RANKED_MATCHMAKING.md`.** The last of the three
+pools was explicitly a design gap, not a code gap, so this pass writes the design rather than
+skipping ahead to code against an undecided rating model. Recommends plain ELO (K=32 flat, no
+provisional-period scaling, starting rating 1000) over Glicko/TrueSkill — those solve a rating-
+uncertainty problem that doesn't exist yet in a symmetric 1v1-only pool with no team-composition
+variance; revisit if ranked ever grows past 1v1. A new `redgarden_ranked_stats` table, kept
+separate from casual `player_game_stats` (ranked rating and casual win/loss are different
+questions, conflating them would corrupt the already-shipped casual leaderboard). Queue rules:
+widening rating-search-window matching, which doesn't fit the existing spawn-on-fill
+`apps/matchmaker` binary as-is — a real queue rewrite, explicitly scoped as its own future pass,
+not bolted on as a flag. Design only; no schema, endpoint, or queue code landed. Golden-indexed
+as REDGARDEN-RANKED.
