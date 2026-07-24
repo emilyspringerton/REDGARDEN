@@ -410,14 +410,21 @@ static void test_frog_r_vanishes(void) {
     CHECK(frog->r_cooldown_ms == ARENA_FROG_R_COOLDOWN_MS, "R starts on its own cooldown after cast");
 }
 
-static void test_frog_has_no_w(void) {
+static void test_frog_w_noop_in_1v1_no_ally(void) {
+    /* Borrowed Time is wired for real now (S170-34, arena_nearest_ally) --
+       this is no longer "unimplemented," it's a real no-op because 1v1
+       genuinely has no teammate to target, same as Ghost's R ally-heal
+       side and Doc Wheel's whole kit in this same mode. */
     arena_init_with_heroes(ARENA_HERO_FROG, ARENA_HERO_UNICORN);
     ArenaHero *frog = &arena_state.heroes[0];
+    int cooldown_before = frog->w_cooldown_ms;
 
     arena_toggle_w(0);
 
     CHECK(frog->w_active == 0 && frog->intangible_ms == 0,
-          "toggling W for The Frog is a no-op -- Borrowed Time is ally-targeted, no ally in 1v1");
+          "toggling W for The Frog leaves w_active/intangible_ms untouched -- Borrowed Time targets an ally, not self");
+    CHECK(frog->w_cooldown_ms == cooldown_before,
+          "no ally in 1v1 means the cast whiffs -- cooldown is not consumed");
 }
 
 /* Regression test, found live 2026-07-24 (NORTHSTAR §13, the MOBA-is-the-
@@ -523,6 +530,213 @@ static void test_team_wipe_win_condition(void) {
     CHECK(arena_state.winner == 1, "team 0 wins once team 1 has zero active-and-alive heroes left");
 }
 
+/* S170-34: allies. arena_nearest_ally is the enabling primitive for every
+ * ally-targeted kit piece previously skipped for having no target in 1v1
+ * (Ghost's R heal side, Frog's W, Doc Wheel's entire kit). */
+
+static void test_nearest_ally_finds_closest_teammate(void) {
+    arena_init_teams();
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].x = 5; arena_state.heroes[1].z = 0;  /* far teammate */
+    arena_state.heroes[2].x = 1; arena_state.heroes[2].z = 0;  /* near teammate */
+
+    ArenaHero *nearest = arena_nearest_ally(0);
+    CHECK(nearest == &arena_state.heroes[2], "arena_nearest_ally picks the closer of two teammates");
+}
+
+static void test_nearest_ally_ignores_enemies_and_dead_teammates(void) {
+    arena_init_teams();
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    /* An enemy right next to owner 0 should never be picked. */
+    arena_state.heroes[ARENA_TEAM_SIZE].x = 0.1f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    /* The nearest teammate is dead -- should be skipped in favor of a living one further out. */
+    arena_state.heroes[1].x = 0.5f; arena_state.heroes[1].z = 0;
+    arena_state.heroes[1].alive = 0;
+    arena_state.heroes[2].x = 3.0f; arena_state.heroes[2].z = 0;
+
+    ArenaHero *nearest = arena_nearest_ally(0);
+    CHECK(nearest == &arena_state.heroes[2],
+          "arena_nearest_ally skips enemies entirely and dead teammates");
+}
+
+static void test_nearest_ally_never_returns_self(void) {
+    arena_init_teams();
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[1].x = 0; arena_state.heroes[1].z = 0; /* exactly on top of owner 0 */
+
+    ArenaHero *nearest = arena_nearest_ally(0);
+    CHECK(nearest == &arena_state.heroes[1] && nearest != &arena_state.heroes[0],
+          "arena_nearest_ally never returns owner itself, even at distance 0 from another candidate");
+}
+
+static void test_nearest_ally_null_in_1v1(void) {
+    /* 1v1 (arena_init_with_heroes) sets heroes[0].team=0, heroes[1].team=1 --
+       no teammate exists at all, so every ally-targeted kit piece must
+       degrade to a safe no-op here, not crash. */
+    arena_init_with_heroes(ARENA_HERO_UNICORN, ARENA_HERO_DUCK);
+    CHECK(arena_nearest_ally(0) == NULL, "arena_nearest_ally returns NULL in 1v1 -- no teammate exists");
+}
+
+static void test_ghost_r_zone_heals_ally_in_team_mode(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_GHOST;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].x = 0; arena_state.heroes[1].z = 0; /* ally, inside the zone radius */
+    arena_state.heroes[1].hp = 50; arena_state.heroes[1].max_hp = 100;
+
+    arena_cast_r(0);
+    /* One full 1000ms zone tick, via the public per-tick entry point --
+       tick_hero_kit itself is static to arena_game.c. */
+    arena_update_teams(1000);
+
+    CHECK(arena_state.heroes[1].hp == 50 + ARENA_GHOST_R_DPS,
+          "Recital's ally-heal side heals a teammate standing in the zone");
+}
+
+static void test_ghost_r_zone_does_not_heal_ally_outside_radius(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_GHOST;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].x = ARENA_GHOST_R_RADIUS * 3.0f; arena_state.heroes[1].z = 0; /* well outside */
+    arena_state.heroes[1].hp = 50; arena_state.heroes[1].max_hp = 100;
+
+    arena_cast_r(0);
+    arena_update_teams(1000);
+
+    CHECK(arena_state.heroes[1].hp == 50, "Recital's ally-heal side does not reach an ally outside the zone radius");
+}
+
+static void test_frog_w_refunds_ally_next_cast_cooldown(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_FROG;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].hero_id = ARENA_HERO_UNICORN;
+    arena_state.heroes[1].x = 1; arena_state.heroes[1].z = 0;
+    /* Unicorn's Q dashes toward its move target if moving, else toward a
+       foe -- neither exists by default in this isolated 2-hero setup, so
+       give it a move target or the dash (and thus the cooldown-setting
+       code path) never actually runs. */
+    arena_state.heroes[1].moving = 1;
+    arena_state.heroes[1].target_x = 5; arena_state.heroes[1].target_z = 0;
+
+    arena_toggle_w(0); /* Frog's Borrowed Time on the nearest ally (owner 1) */
+    CHECK(arena_state.heroes[1].next_cast_refund == 1,
+          "Borrowed Time places the refund buff on the nearest ally, not the caster");
+
+    arena_cast_q(1); /* Unicorn's Q would normally set a long cooldown */
+    CHECK(arena_state.heroes[1].q_cooldown_ms == 0,
+          "the buffed ally's next cast is refunded to zero cooldown");
+    CHECK(arena_state.heroes[1].next_cast_refund == 0,
+          "the refund buff is consumed after one cast, not reusable");
+}
+
+static void test_frog_w_whiffs_with_no_ally_cooldown_not_consumed(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_FROG;
+
+    arena_toggle_w(0);
+
+    CHECK(arena_state.heroes[0].w_cooldown_ms == 0,
+          "Borrowed Time whiffs with no living ally -- cooldown is not consumed");
+}
+
+static void test_doc_wheel_q_heals_more_at_lower_hp(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_DOC_WHEEL;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].x = 1; arena_state.heroes[1].z = 0;
+    arena_state.heroes[1].max_hp = 100;
+    arena_state.heroes[1].hp = 95; /* near-full HP */
+
+    arena_cast_q(0);
+    int healed_near_full = arena_state.heroes[1].hp - 95;
+
+    /* Reset and try again from low HP. */
+    arena_state.heroes[0].q_cooldown_ms = 0;
+    arena_state.heroes[1].hp = 10; /* near-empty HP */
+    arena_cast_q(0);
+    int healed_near_empty = arena_state.heroes[1].hp - 10;
+
+    CHECK(healed_near_empty > healed_near_full,
+          "Bedside Manner heals more the lower the target's current HP%% is");
+}
+
+static void test_doc_wheel_q_cleanses_silence(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_DOC_WHEEL;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].x = 1; arena_state.heroes[1].z = 0;
+    arena_state.heroes[1].max_hp = 100; arena_state.heroes[1].hp = 100;
+    arena_state.heroes[1].silenced_ms = 2000;
+
+    arena_cast_q(0);
+
+    CHECK(arena_state.heroes[1].silenced_ms == 0, "Bedside Manner cleanses an active silence");
+}
+
+static void test_doc_wheel_q_whiffs_with_no_ally_cooldown_not_consumed(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_DOC_WHEEL;
+
+    arena_cast_q(0);
+
+    CHECK(arena_state.heroes[0].q_cooldown_ms == 0,
+          "Bedside Manner whiffs with no living ally -- cooldown is not consumed");
+}
+
+static void test_doc_wheel_w_teleports_to_ally(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_DOC_WHEEL;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].x = 7.5f; arena_state.heroes[1].z = -3.0f;
+
+    arena_toggle_w(0);
+
+    CHECK(arena_state.heroes[0].x == 7.5f && arena_state.heroes[0].z == -3.0f,
+          "House Call teleports Doc Wheel to the nearest ally's exact position");
+}
+
+static void test_doc_wheel_r_heals_allies_in_radius_only(void) {
+    arena_init_teams();
+    for (int i = 3; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_DOC_WHEEL;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].x = 1; arena_state.heroes[1].z = 0; /* in radius */
+    arena_state.heroes[1].max_hp = 100; arena_state.heroes[1].hp = 50;
+    arena_state.heroes[2].x = ARENA_DOC_WHEEL_R_RADIUS * 3.0f; arena_state.heroes[2].z = 0; /* out of radius */
+    arena_state.heroes[2].max_hp = 100; arena_state.heroes[2].hp = 50;
+
+    arena_cast_r(0);
+
+    CHECK(arena_state.heroes[1].hp == 50 + ARENA_DOC_WHEEL_R_HEAL,
+          "No Combat Power heals an ally within radius");
+    CHECK(arena_state.heroes[2].hp == 50,
+          "No Combat Power does not reach an ally outside radius");
+}
+
+static void test_doc_wheel_r_consumes_cooldown_even_with_zero_allies(void) {
+    /* A real ultimate commitment, not a whiff-refunded poke -- unlike Q,
+       which no-ops (and doesn't spend its cooldown) with no ally, R always
+       "lands" per its own header comment. */
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_DOC_WHEEL;
+
+    arena_cast_r(0);
+
+    CHECK(arena_state.heroes[0].r_cooldown_ms == ARENA_DOC_WHEEL_R_COOLDOWN_MS,
+          "No Combat Power consumes its cooldown even when zero allies are in range");
+}
+
 int main(void) {
     printf("RED GARDEN arena_game headless smoke test\n\n");
     test_movement_reaches_target();
@@ -551,13 +765,27 @@ int main(void) {
     test_frog_q_rewinds_position_and_hp();
     test_frog_q_uses_oldest_available_history_before_3s_elapsed();
     test_frog_r_vanishes();
-    test_frog_has_no_w();
+    test_frog_w_noop_in_1v1_no_ally();
     test_arena_bot_enabled_gates_kit_casts_too();
     test_arena_init_teams_sets_up_both_sides();
     test_nearest_enemy_finds_closest_on_other_team();
     test_nearest_enemy_ignores_teammates_and_dead_heroes();
     test_team_melee_converges_multiple_attackers_on_one_target();
     test_team_wipe_win_condition();
+    test_nearest_ally_finds_closest_teammate();
+    test_nearest_ally_ignores_enemies_and_dead_teammates();
+    test_nearest_ally_never_returns_self();
+    test_nearest_ally_null_in_1v1();
+    test_ghost_r_zone_heals_ally_in_team_mode();
+    test_ghost_r_zone_does_not_heal_ally_outside_radius();
+    test_frog_w_refunds_ally_next_cast_cooldown();
+    test_frog_w_whiffs_with_no_ally_cooldown_not_consumed();
+    test_doc_wheel_q_heals_more_at_lower_hp();
+    test_doc_wheel_q_cleanses_silence();
+    test_doc_wheel_q_whiffs_with_no_ally_cooldown_not_consumed();
+    test_doc_wheel_w_teleports_to_ally();
+    test_doc_wheel_r_heals_allies_in_radius_only();
+    test_doc_wheel_r_consumes_cooldown_even_with_zero_allies();
     printf("\n%s\n", failures == 0 ? "ALL PASS" : "SOME FAILED");
     return failures == 0 ? 0 : 1;
 }

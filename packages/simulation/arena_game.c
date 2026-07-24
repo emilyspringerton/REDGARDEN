@@ -192,6 +192,41 @@ ArenaHero *arena_nearest_enemy(int owner) {
     return best;
 }
 
+/* arena_nearest_ally: the nearest active, living hero on the SAME team as
+ * `owner`, excluding owner itself. Mirrors arena_nearest_enemy exactly
+ * (S170-34) -- the enabling primitive for every ally-targeted kit piece
+ * previously skipped for having no target in 1v1. */
+ArenaHero *arena_nearest_ally(int owner) {
+    if (owner < 0 || owner >= ARENA_MAX_HEROES) return NULL;
+    ArenaHero *self = &arena_state.heroes[owner];
+    if (!self->active) return NULL;
+    ArenaHero *best = NULL;
+    float best_dist = 0.0f;
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+        if (i == owner) continue;
+        ArenaHero *cand = &arena_state.heroes[i];
+        if (!cand->active || !cand->alive) continue;
+        if (cand->team != self->team) continue;
+        float dx = cand->x - self->x, dz = cand->z - self->z;
+        float dist = sqrtf(dx * dx + dz * dz);
+        if (!best || dist < best_dist) { best = cand; best_dist = dist; }
+    }
+    return best;
+}
+
+/* cast_cooldown: applies the generic next_cast_refund buff (S170-34,
+ * Frog's Borrowed Time) -- returns 0 and consumes the buff if it's set on
+ * h, else returns normal_ms unchanged. Every Q/W/R cooldown-assignment
+ * site in this file routes through this so any future ally-buff kit gets
+ * the same refund semantics for free. */
+static int cast_cooldown(ArenaHero *h, int normal_ms) {
+    if (h->next_cast_refund) {
+        h->next_cast_refund = 0;
+        return 0;
+    }
+    return normal_ms;
+}
+
 /* hero_is_hittable: The Ghost's W (S170-32) is the first ability in this
  * arena that needs a "can this hero currently be hit at all" concept,
  * distinct from just being alive -- used by auto-attacks and ability
@@ -269,7 +304,7 @@ static void unicorn_cast_q(ArenaHero *h, ArenaHero *foe) {
             if (foe->hp <= 0) { foe->hp = 0; foe->alive = 0; }
         }
     }
-    h->q_cooldown_ms = ARENA_UNICORN_Q_COOLDOWN_MS;
+    h->q_cooldown_ms = cast_cooldown(h, ARENA_UNICORN_Q_COOLDOWN_MS);
 }
 
 /* duck_pull_foe: shared logic for Telekinetic Yank (Q) and the bigger
@@ -329,6 +364,25 @@ static void frog_cast_q(ArenaHero *frog) {
     frog->moving = 0;
 }
 
+/* doc_wheel_heal_amount: Extremely Good At Medicine -- linearly scales from
+ * ARENA_DOC_WHEEL_Q_HEAL_BASE at 100% target HP up to
+ * ARENA_DOC_WHEEL_Q_HEAL_LOW_HP at 0% target HP (S170-34). */
+static int doc_wheel_heal_amount(const ArenaHero *target) {
+    if (target->max_hp <= 0) return ARENA_DOC_WHEEL_Q_HEAL_BASE;
+    float hp_pct = (float)target->hp / (float)target->max_hp;
+    if (hp_pct < 0.0f) hp_pct = 0.0f;
+    if (hp_pct > 1.0f) hp_pct = 1.0f;
+    float heal = ARENA_DOC_WHEEL_Q_HEAL_BASE +
+                 (ARENA_DOC_WHEEL_Q_HEAL_LOW_HP - ARENA_DOC_WHEEL_Q_HEAL_BASE) * (1.0f - hp_pct);
+    return (int)heal;
+}
+
+static void doc_wheel_heal_and_cleanse(ArenaHero *target, int amount) {
+    target->hp += amount;
+    if (target->hp > target->max_hp) target->hp = target->max_hp;
+    target->silenced_ms = 0; /* Bedside Manner: "cleanses one debuff" -- the only debuff arena has today */
+}
+
 void arena_cast_q(int owner) {
     if (owner < 0 || owner >= ARENA_MAX_HEROES) return;
     ArenaHero *h = &arena_state.heroes[owner];
@@ -341,18 +395,30 @@ void arena_cast_q(int owner) {
         break;
     case ARENA_HERO_DUCK:
         if (duck_pull_foe(h, foe, ARENA_DUCK_Q_PULL_DIST, ARENA_DUCK_Q_DAMAGE, ARENA_DUCK_Q_RANGE)) {
-            h->q_cooldown_ms = ARENA_DUCK_Q_COOLDOWN_MS;
+            h->q_cooldown_ms = cast_cooldown(h, ARENA_DUCK_Q_COOLDOWN_MS);
         }
         break;
     case ARENA_HERO_GHOST:
         if (ghost_cast_q(h, foe)) {
-            h->q_cooldown_ms = ARENA_GHOST_Q_COOLDOWN_MS;
+            h->q_cooldown_ms = cast_cooldown(h, ARENA_GHOST_Q_COOLDOWN_MS);
         }
         break;
     case ARENA_HERO_FROG:
         frog_cast_q(h);
-        h->q_cooldown_ms = ARENA_FROG_Q_COOLDOWN_MS;
+        h->q_cooldown_ms = cast_cooldown(h, ARENA_FROG_Q_COOLDOWN_MS);
         break;
+    case ARENA_HERO_DOC_WHEEL: {
+        /* Bedside Manner: single-target heal + cleanse, on the nearest
+           ally. No ally (1v1, or ally already dead) -- no-op, cooldown not
+           consumed, same "whiff doesn't cost you the cooldown" convention
+           as Duck/Ghost's Q. */
+        ArenaHero *ally = arena_nearest_ally(owner);
+        if (ally && ally->alive) {
+            doc_wheel_heal_and_cleanse(ally, doc_wheel_heal_amount(ally));
+            h->q_cooldown_ms = cast_cooldown(h, ARENA_DOC_WHEEL_Q_COOLDOWN_MS);
+        }
+        break;
+    }
     }
 }
 
@@ -371,13 +437,39 @@ void arena_toggle_w(int owner) {
            like Unicorn's regen. */
         if (h->w_cooldown_ms > 0) return;
         h->intangible_ms = ARENA_GHOST_W_INTANGIBLE_MS;
-        h->w_cooldown_ms = ARENA_GHOST_W_COOLDOWN_MS;
+        h->w_cooldown_ms = cast_cooldown(h, ARENA_GHOST_W_COOLDOWN_MS);
+        break;
+    case ARENA_HERO_FROG: {
+        /* Borrowed Time: places the refund buff on the nearest ally --
+           wired for real now that arena_nearest_ally exists (was skipped
+           for no ally target in 1v1, S170-33). No-op, cooldown not
+           consumed, if there's no living ally to target. */
+        if (h->w_cooldown_ms > 0) return;
+        ArenaHero *ally = arena_nearest_ally(owner);
+        if (ally && ally->alive) {
+            ally->next_cast_refund = 1;
+            h->w_cooldown_ms = cast_cooldown(h, ARENA_FROG_W_COOLDOWN_MS);
+        }
+        break;
+    }
+    case ARENA_HERO_DOC_WHEEL:
+        /* House Call: instant teleport to the nearest ally's location, on
+           a long cooldown ("always shows up"). No-op if there's no ally. */
+        if (h->w_cooldown_ms > 0) return;
+        {
+            ArenaHero *ally = arena_nearest_ally(owner);
+            if (ally && ally->alive) {
+                h->x = ally->x;
+                h->z = ally->z;
+                h->moving = 0;
+                h->w_cooldown_ms = cast_cooldown(h, ARENA_DOC_WHEEL_W_COOLDOWN_MS);
+            }
+        }
         break;
     default:
         /* No-op for any hero without a real W in this arena, not a crash
            or a silent wrong kit: Duck's W (Government Clearance) needs
-           objective structures that don't exist here; Frog's W (Borrowed
-           Time) is ally-targeted and there's no ally in a 1v1. */
+           objective structures that don't exist here. */
         break;
     }
 }
@@ -391,22 +483,24 @@ void arena_cast_r(int owner) {
     switch (h->hero_id) {
     case ARENA_HERO_UNICORN:
         h->r_active_ms = ARENA_UNICORN_R_DURATION_MS;
-        h->r_cooldown_ms = ARENA_UNICORN_R_COOLDOWN_MS;
+        h->r_cooldown_ms = cast_cooldown(h, ARENA_UNICORN_R_COOLDOWN_MS);
         break;
     case ARENA_HERO_DUCK:
         if (duck_pull_foe(h, foe, ARENA_DUCK_R_PULL_DIST, ARENA_DUCK_R_DAMAGE, ARENA_DUCK_R_RANGE)) {
-            h->r_cooldown_ms = ARENA_DUCK_R_COOLDOWN_MS;
+            h->r_cooldown_ms = cast_cooldown(h, ARENA_DUCK_R_COOLDOWN_MS);
         }
         break;
     case ARENA_HERO_GHOST:
-        /* Recital: only the enemy-damage side is implemented -- the
-           ally-heal side (docs/HEROES_VS0.md: "same zone, opposite effect
-           depending on team") has no target in a 1v1, flagged not faked. */
+        /* Recital: the ally-heal side (docs/HEROES_VS0.md: "same zone,
+           opposite effect depending on team") is wired for real now that
+           arena_nearest_ally exists (S170-34) -- see tick_hero_kit's zone
+           tick below for the actual heal application, since it needs the
+           `ally` parameter that loop already threads through. */
         h->r_zone_x = h->x;
         h->r_zone_z = h->z;
         h->r_zone_tick_ms = 0;
         h->r_active_ms = ARENA_GHOST_R_DURATION_MS;
-        h->r_cooldown_ms = ARENA_GHOST_R_COOLDOWN_MS;
+        h->r_cooldown_ms = cast_cooldown(h, ARENA_GHOST_R_COOLDOWN_MS);
         break;
     case ARENA_HERO_FROG:
         /* The Secret, simplified: reuses the intangible_ms mechanic at a
@@ -415,12 +509,29 @@ void arena_cast_r(int owner) {
            in place, flagged as a simplification rather than the full
            ability. */
         h->intangible_ms = ARENA_FROG_R_VANISH_MS;
-        h->r_cooldown_ms = ARENA_FROG_R_COOLDOWN_MS;
+        h->r_cooldown_ms = cast_cooldown(h, ARENA_FROG_R_COOLDOWN_MS);
+        break;
+    case ARENA_HERO_DOC_WHEEL:
+        /* No Combat Power, As Advertised: teamwide cleanse + heal within
+           radius, simplified from a literal shield (see header comment).
+           Unlike Q's single-target heal, this always "lands" and consumes
+           the cooldown even with zero allies in range -- a real ultimate
+           commitment, not a whiff-refunded poke. */
+        for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+            ArenaHero *ally = &arena_state.heroes[i];
+            if (i == owner || !ally->active || !ally->alive) continue;
+            if (ally->team != h->team) continue;
+            float dx = ally->x - h->x, dz = ally->z - h->z;
+            if (sqrtf(dx * dx + dz * dz) <= ARENA_DOC_WHEEL_R_RADIUS) {
+                doc_wheel_heal_and_cleanse(ally, ARENA_DOC_WHEEL_R_HEAL);
+            }
+        }
+        h->r_cooldown_ms = cast_cooldown(h, ARENA_DOC_WHEEL_R_COOLDOWN_MS);
         break;
     }
 }
 
-static void tick_hero_kit(ArenaHero *h, ArenaHero *foe, unsigned int dt_ms) {
+static void tick_hero_kit(ArenaHero *h, ArenaHero *foe, ArenaHero *ally, unsigned int dt_ms) {
     /* Cooldowns and status effects (silence, intangibility) are generic --
        any hero can carry them, not just whichever kit currently applies
        them (S170-32). */
@@ -485,6 +596,16 @@ static void tick_hero_kit(ArenaHero *h, ArenaHero *foe, unsigned int dt_ms) {
                         if (foe->hp <= 0) { foe->hp = 0; foe->alive = 0; }
                     }
                 }
+                /* Ally-heal side (S170-34): "same zone, opposite effect
+                   depending on team" -- the nearest living ally standing in
+                   the zone heals for the same rate the foe takes damage. */
+                if (ally && ally->alive) {
+                    float adx = ally->x - h->r_zone_x, adz = ally->z - h->r_zone_z;
+                    if (sqrtf(adx * adx + adz * adz) <= ARENA_GHOST_R_RADIUS) {
+                        ally->hp += ARENA_GHOST_R_DPS;
+                        if (ally->hp > ally->max_hp) ally->hp = ally->max_hp;
+                    }
+                }
             }
         }
         break;
@@ -533,6 +654,15 @@ static void bot_cast_kit_if_ready(ArenaHero *bot, ArenaHero *foe) {
             arena_cast_q(bot->owner);
         }
         break;
+    case ARENA_HERO_DOC_WHEEL:
+        /* This heuristic is 1v1-only local-demo AI, and Doc Wheel's entire
+           kit is ally-targeted -- no useful action exists with no ally
+           present (S170-34). Doc Wheel is a real, working pick in team
+           mode via apps/arena_bot's own simpler "cast Q periodically"
+           heuristic, which the server-side dispatch already handles
+           correctly regardless of hero. Intentional no-op here, not a
+           missing case. */
+        break;
     }
 }
 
@@ -561,8 +691,11 @@ void arena_update(unsigned int dt_ms) {
     update_hero_motion(&arena_state.heroes[0], dt_sec);
     update_hero_motion(&arena_state.heroes[1], dt_sec);
     resolve_combat(dt_ms);
-    tick_hero_kit(&arena_state.heroes[0], &arena_state.heroes[1], dt_ms);
-    tick_hero_kit(&arena_state.heroes[1], &arena_state.heroes[0], dt_ms);
+    /* No ally in the 1v1 local path (S170-34: arena_nearest_ally only
+       exists for team mode) -- NULL is the correct value, same NULL-safety
+       hero_is_hittable already relies on elsewhere. */
+    tick_hero_kit(&arena_state.heroes[0], &arena_state.heroes[1], NULL, dt_ms);
+    tick_hero_kit(&arena_state.heroes[1], &arena_state.heroes[0], NULL, dt_ms);
     /* Gated the same as arena_bot_tick (movement) above -- without this, a
        real second player (owner 1) would still get their kit cast
        autonomously by the internal bot AI (including Duck's Q, which pulls
@@ -659,7 +792,7 @@ void arena_update_teams(unsigned int dt_ms) {
     for (int i = 0; i < ARENA_MAX_HEROES; i++) {
         ArenaHero *h = &arena_state.heroes[i];
         if (!h->active) continue;
-        tick_hero_kit(h, arena_nearest_enemy(i), dt_ms);
+        tick_hero_kit(h, arena_nearest_enemy(i), arena_nearest_ally(i), dt_ms);
     }
 
     int team0_alive = arena_team_alive_count(0);

@@ -10,6 +10,7 @@ const char *arena_hero_name(ArenaHeroID hero_id) {
     case ARENA_HERO_DUCK:    return "duck";
     case ARENA_HERO_GHOST:   return "ghost";
     case ARENA_HERO_FROG:    return "frog";
+    case ARENA_HERO_DOC_WHEEL: return "doc_wheel";
     default:                 return "unknown";
     }
 }

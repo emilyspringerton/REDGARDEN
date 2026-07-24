@@ -534,6 +534,57 @@ cooking) — the next roster move is either building one of those systems, or tr
 4-hero roster as complete for this testbed's purposes. That's a real decision point, not
 continuing the same "pick the next one" pattern blindly.
 
+**Decision made, allies built (2026-07-24, S170-34): `arena_nearest_ally`.** Founder chose
+"build allies/multi-hero-per-team in arena" over the other options (build territory, or declare
+the roster complete). Team-mode infrastructure (`ARENA_TEAM_SIZE`/`ARENA_MAX_HEROES`,
+`arena_init_teams`, `arena_nearest_enemy`) already existed from the earlier 10v10 pivot — the
+actual missing piece was purely an ally-targeting primitive, not a from-scratch system.
+`arena_nearest_ally(int owner)` mirrors `arena_nearest_enemy` exactly (nearest active, living,
+same-team hero, excluding self); `tick_hero_kit` gained an `ally` parameter alongside its
+existing `foe` one.
+
+**Unblocked and wired with the new primitive:**
+- **Ghost's Recital (R), ally-heal side** — previously "only the enemy-damage side is
+  implemented... flagged not faked." Now the zone's fixed-interval tick also heals a living ally
+  standing in it, same rate as the enemy-damage side.
+- **Frog's Borrowed Time (W)** — previously skipped entirely for having no ally target. Now
+  places a generic `next_cast_refund` buff on the nearest ally; the *next* successful Q/W/R that
+  ally casts (any hero, any ability — the mechanism is generic, not Frog-specific) has its
+  cooldown refunded to zero instead of the normal value. Found and fixed one real bug in the
+  headless test writing this: a test asserting the refund fired against a Unicorn with no move
+  target and no foe — `unicorn_cast_q` returns early in that exact case (nothing to dash toward),
+  so the refund path never actually executed; the assertion had been passing by coincidence
+  (default cooldown state already read as 0), not because the refund fired. Fixed the test to
+  give Unicorn a real move target so its Q genuinely executes.
+- **Doc Wheel (Buer) — fifth hero kit, the first ally-only kit** ("the entire kit is being the
+  correct ally to have nearby"). Passive (Extremely Good At Medicine) scales heal amount from
+  `ARENA_DOC_WHEEL_Q_HEAL_BASE` at 100% target HP up to `..._LOW_HP` at 0%. Q (Bedside Manner):
+  single-target heal + silence-cleanse on the nearest ally, whiffs (no cooldown consumed) with no
+  ally. W (House Call): instant teleport to the nearest ally's position, long cooldown. R (No
+  Combat Power, As Advertised): teamwide cleanse + heal to every ally in radius — **simplified
+  from a literal absorb-shield**, which would need a new generic damage-absorption mechanic
+  touching every damage call site in this file for one ability's sake; deferred rather than built
+  shallow, flagged not faked, same reasoning as other simplified (not faked) pieces in this
+  roster. Unlike Q, R always consumes its cooldown even with zero allies in range — a real
+  ultimate commitment, not a whiff-refunded poke. The RED GARDEN passive (CORRUPTED-cell decay on
+  heal) stays skipped — arena has no `GridCell`/territory system, same blocker as Tree/Pizza/
+  Druid from the original audit.
+- `apps/arena_bot`'s draft picker (`my_owner % 4` → `% 5`) and `apps/arena_server`'s pick-
+  validation bound (`> ARENA_HERO_FROG` → `> ARENA_HERO_DOC_WHEEL`) updated so Doc Wheel is
+  actually draftable over the wire, not just in headless tests.
+
+**Verified live:** two separate real matches (10-bot and 20-bot lobbies) both drafted Doc Wheel
+without incident — `CLIENT 4 picked hero_id=4`, `CLIENT 9 picked hero_id=4`, "All N heroes picked
+-- match live" in both. 16 new headless tests (ally-targeting primitive, both ally-heal/refund
+completions, and Doc Wheel's full kit) all pass alongside the complete existing suite.
+
+**Not done, still real blockers:** Doc Wheel's teammates' 1v1-only bot heuristic
+(`bot_cast_kit_if_ready`) has an intentional no-op case for Doc Wheel — that heuristic only ever
+runs in the local 1v1 demo, where Doc Wheel's entire ally-dependent kit has nothing to do;
+`apps/arena_bot`'s own simpler "cast Q periodically" heuristic already exercises it correctly in
+team mode. The remaining 7 heroes (Donkey, Tree, Pizza, Retrieval Cart, TYLER, Flamel, Druid) stay
+blocked on grid/territory or multi-unit-per-hero, neither of which this pass built.
+
 **Phase E — Game AI: reuse existing org tech, don't invent a parallel stack.** Founder: "using the
 full depth breadth and width of einhorn ai tech for games" → "incorporate all of the tech into the
 REDGARDEN bots." A full-repo scan (610 `.md` files, EMILY/BACKLOG.md S170-19) found the pattern to
