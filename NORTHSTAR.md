@@ -1,8 +1,9 @@
 # NORTHSTAR — RED GARDEN
 
-**Status:** Core product (elevated 2026-07-19) — real-time scoping session, capturing founder
-direction accurately before implementation continues, per the Emily Way's "spec before
-implementation."
+**Status:** Core product (elevated 2026-07-19). **Product pivot 2026-07-24 — see §13: `apps/arena`
+(the hero click-to-move MOBA) is the product now, not the card-RTS.** Read §13 before assuming
+anything in §1-§12 below still reflects where new work should go — those sections predate the
+pivot and are kept for the card-RTS's own (now secondary) history, not as current direction.
 
 ---
 
@@ -577,3 +578,33 @@ that, are separate, later slices gated on this contract existing first — same 
 discipline used between Phases B and C.
 
 Each phase depends on the one before it — the sequence is the plan, not just the list.
+
+## 13. Product pivot — the MOBA is the product (2026-07-24)
+
+Direct founder correction, in order: "i need pvp not the autometa pvp that got validated as
+boring" → "this is a fucking pivot as i framed it" → "the card game is fucking boring" →
+"cancel it" → "pivooooot to the moba." This followed an attempt (mid-plan-mode, canceled before
+any code was touched) to scale bot-vs-bot matchmaking to a 10v10 automated-battle mode — the
+founder rejected that outright: bot-vs-bot "autometa" combat (bots walking into range and
+auto-trading hits) has already been judged boring, and scaling the team size to 20 heroes doesn't
+fix that, it just produces more of it.
+
+**`apps/arena` — the hero click-to-move MOBA — is REDGARDEN's real product now.** Everything in
+§1-§12 above (the Clash Royale card-hand RTS, `apps/server`/`packages/simulation/local_game.c`,
+the matchmaker/WOTAN work built against it) stays as real, working, tested infrastructure — it is
+not being ripped out — but it is no longer what new work builds toward. `apps/arena`'s own history
+this session is real too and doesn't restart from zero: colored-cube heroes with basic shading,
+right-drag-orbit + scroll-zoom camera, click-to-move with an animated ring marker, a 4-hero roster
+with real ability kits (Unicorn/Duck/Ghost/Frog, §12 Phase D), and — as of S170-41 — real WOTAN
+player identities and match-result reporting, all headless-tested and, for the sim logic, verified
+without needing a display.
+
+**What "real PvP, not autometa" means concretely: `apps/arena` has zero networking.** A human can
+run the SDL2 client and fight the sim's own hand-authored bot locally, but there is no way for a
+second connection — human or bot — to join that same match over a network. That is the actual gap
+between "bots fighting bots" and "PvP": the next real technical priority is giving the existing,
+already-playable client a way to connect to a real match server, so a human's own input drives a
+hero instead of only ever facing (or being) a bot brain. **Explicitly deferred until 1v1
+human-playable networked PvP is proven fun:** 10v10, N-player lobbies, persistent bot fleets, team
+assignment. Scaling team size before the core loop is confirmed fun was the mistake in the
+canceled plan; not repeating it here.
