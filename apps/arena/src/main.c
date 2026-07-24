@@ -47,6 +47,31 @@
 static int net_mode = 0;
 static int my_owner = 0; /* which arena_state.heroes[] slot is "me" -- 0 in local mode always */
 
+/* Toggleable APM overlay (S170-71): off by default, F11 flips it. Ring buffer of action
+ * timestamps (moves + Q/W/E casts) so the on-screen number is a real trailing-60s rate, not a
+ * running-average-since-launch. */
+#define APM_RING_CAP 512
+static int show_apm = 0;
+static uint32_t apm_ring[APM_RING_CAP];
+static int apm_ring_head = 0;
+static int apm_ring_count = 0;
+
+static void apm_record_action(uint32_t now_ms) {
+    apm_ring[apm_ring_head] = now_ms;
+    apm_ring_head = (apm_ring_head + 1) % APM_RING_CAP;
+    if (apm_ring_count < APM_RING_CAP) apm_ring_count++;
+}
+
+static int apm_compute(uint32_t now_ms) {
+    int count = 0;
+    for (int i = 0; i < apm_ring_count; i++) {
+        int idx = (apm_ring_head - 1 - i + APM_RING_CAP) % APM_RING_CAP;
+        if (now_ms - apm_ring[idx] > 60000) break; /* ring is time-ordered -- stop at the first stale entry */
+        count++;
+    }
+    return count;
+}
+
 /* This whole networking section (through the matching closing comment
  * below) used to be #ifndef _WIN32-only, with main() stubbing out
  * --connect/--queue entirely on Windows as a result. Now that the
@@ -928,6 +953,9 @@ int main(int argc, char *argv[]) {
                 if (cam_dist < 4.0f) cam_dist = 4.0f;
                 if (cam_dist > 30.0f) cam_dist = 30.0f;
             }
+            if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F11) {
+                show_apm = !show_apm; /* S170-71: works in any mode, not gated on net_mode/observing */
+            }
             /* Everything below drives a live match (movement clicks, kit
              * casts, restart-into-a-new-match) -- none of it applies while
              * observing a logged one. Camera control above still works, so
@@ -941,6 +969,7 @@ int main(int argc, char *argv[]) {
                     if (net_mode) net_send_move(gx, gz);
                     else arena_set_move_target(my_owner, gx, gz);
                     spawn_ring(gx, gz);
+                    apm_record_action(now);
                 }
             }
             /* Requeue-after-win OK button (S170-66/68: "we need to requeue after
@@ -994,6 +1023,9 @@ int main(int argc, char *argv[]) {
              * match" in local mode, so the ultimate goes on E. In net_mode,
              * casts are sent to the server, which owns cooldowns/effects. */
             if (!observing && e.type == SDL_KEYDOWN && arena_state.winner == 0) {
+                if (e.key.keysym.sym == SDLK_q || e.key.keysym.sym == SDLK_w || e.key.keysym.sym == SDLK_e) {
+                    apm_record_action(now);
+                }
                 if (net_mode) {
                     if (e.key.keysym.sym == SDLK_q) net_send_cast(0);
                     if (e.key.keysym.sym == SDLK_w) net_send_cast(1);
@@ -1168,6 +1200,13 @@ int main(int argc, char *argv[]) {
             draw_string(wbuf, 120, win_h - 95.0f, 12);
             glColor3f(h->r_cooldown_ms > 0 ? 0.5f : 0.9f, 0.4f, h->r_cooldown_ms > 0 ? 0.5f : 0.9f);
             draw_string(ebuf, 220, win_h - 95.0f, 12);
+        }
+
+        if (show_apm) {
+            char apmbuf[24];
+            snprintf(apmbuf, sizeof(apmbuf), "APM %d", apm_compute(now));
+            glColor3f(0.9f, 0.9f, 0.3f);
+            draw_string(apmbuf, win_w - 140.0f, win_h - 30.0f, 14);
         }
 
         if (arena_state.winner != 0) {

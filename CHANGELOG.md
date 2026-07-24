@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-24 (31)
+
+- feat(arena): toggleable APM overlay, F11 (S170-71). Founder: "add toggalable apm overlay f11"
+  → "adding apm near term if its cheap." Ring buffer of action timestamps (clicks + Q/W/E casts)
+  in `apps/arena/src/main.c`, `apm_compute()` counts entries within a trailing 60s window so the
+  on-screen number is a real rate rather than a since-launch average. Off by default, F11 toggles
+  it in any mode (local, net, or observing). Ties into `REDGARDEN/CLAUDE.md`'s standing
+  high-APM-affordance UI constraint. Verified: `scripts/build_arena.sh` + `scripts/test_arena.sh`
+  clean, local mingw cross-compile clean.
+
 ## 2026-07-24 (30)
 
 - fix(ops): redgarden-bot-pool.service never set REDGARDEN_TICKET_SECRET (S170-72) -- the real
