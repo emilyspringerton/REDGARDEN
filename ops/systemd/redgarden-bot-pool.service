@@ -8,8 +8,17 @@
 #   systemctl --user enable --now redgarden-bot-pool.service
 #
 # Added 2026-07-24 (EMILY/BACKLOG.md S170-65). Must start after
-# redgarden-matchmaker-bots.service or the bots' first few connect attempts just fail and retry
-# (harmless, but noisy in the log) -- ordered via After=/Wants= below.
+# redgarden-matchmaker-bots.service -- ordered via After=/Wants= below.
+#
+# REDGARDEN_TICKET_SECRET (S170-72) is REQUIRED here, not optional: apps/arena_bot mints its own
+# connect ticket from this env var when it has no real WOTAN identity (the self-mint fallback,
+# same one apps/arena uses via PLAY.bat). Without it, every bot queues into the matchmaker fine
+# (queuing doesn't need a ticket) but then silently fails PACKET_CONNECT to the spawned game
+# server -- the match forms, sits at 0/N connected until its 60s no-progress timeout, and the
+# whole pool re-queues into a fresh, equally-doomed match. This was the actual root cause of "no
+# entities visible" during live testing: matches were never truly starting at all, not a
+# rendering bug. Confirmed live: this unit ran with NO Environment= line since it was first
+# written, only the two matchmaker units had the secret set.
 #
 # Supervision granularity: scripts/run_bot_pool.sh exits (and takes the whole pool down with it,
 # via its own cleanup trap) as soon as *any single* bot process dies, and systemd's Restart=
@@ -24,6 +33,7 @@ Wants=redgarden-matchmaker-bots.service
 [Service]
 Type=simple
 WorkingDirectory=/home/fatbaby/REDGARDEN
+Environment=REDGARDEN_TICKET_SECRET=test-secret-for-vs0-vs1-validation
 ExecStartPre=/bin/sleep 2
 ExecStart=/home/fatbaby/REDGARDEN/scripts/run_bot_pool.sh 19
 Restart=on-failure

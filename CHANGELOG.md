@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-07-24 (30)
+
+- fix(ops): redgarden-bot-pool.service never set REDGARDEN_TICKET_SECRET (S170-72) -- the real
+  root cause of "no entities visible," not a rendering or death bug. Live investigation of the
+  founder's "i cant see myself or team or enemies" / "maybe the game isnt actually working right
+  theres no entities" turned up ~55 accumulated zombie arena_server processes, all stuck at
+  "0/20 connected" until their 60s no-progress timeout. The matchmaker log showed lobbies filling
+  and spawning a real dedicated server every time, but no client ever completed PACKET_CONNECT to
+  it. Root cause: only the two matchmaker systemd units had REDGARDEN_TICKET_SECRET set --
+  redgarden-bot-pool.service (the unit that actually runs the 19 apps/arena_bot processes) never
+  did, since it was written. Bots could queue fine (no ticket needed for that) but silently failed
+  to mint a valid connect ticket for the actual game-server handshake, so matches formed and then
+  sat empty forever. Fixed by adding Environment=REDGARDEN_TICKET_SECRET=... to the bot-pool unit.
+  Verified live: killed the zombie servers, restarted all three services, watched real
+  CLIENT N CONNECTED lines climb to 18-20/20 across several matches -- the system is now capped
+  only by needing a 20th (human) player, not by a broken connect path.
+
 ## 2026-07-24 (29)
 
 - fix(arena): the actual instant "YOU WIN" bug (S170-66) -- three more `#ifndef _WIN32` guards
