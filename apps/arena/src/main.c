@@ -369,8 +369,13 @@ static uint32_t arena_log_since_snapshot_ms = 0;
 #define ARENA_LOG_SNAPSHOT_INTERVAL_MS 500
 
 static void arena_log_open(void) {
+#ifdef _WIN32
+    mkdir("var");
+    mkdir("var/matches");
+#else
     mkdir("var", 0755);
     mkdir("var/matches", 0755);
+#endif
     char path[256];
     snprintf(path, sizeof(path), "var/matches/arena-%ld.jsonl", (long)time(NULL));
     if (arena_log_fp) fclose(arena_log_fp);
