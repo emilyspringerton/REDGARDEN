@@ -245,6 +245,117 @@ static void test_hero_dispatch_is_by_hero_not_owner_slot(void) {
           "Unicorn's R still doubles armor when Unicorn is in owner slot 1, not slot 0");
 }
 
+/* --- The Ghost's kit (docs/HEROES_VS0.md, EMILY/BACKLOG.md S170-32) --- */
+
+static void test_ghost_q_damages_and_silences_in_range(void) {
+    arena_init_with_heroes(ARENA_HERO_UNICORN, ARENA_HERO_GHOST);
+    ArenaHero *ghost = &arena_state.heroes[1];
+    ArenaHero *foe = &arena_state.heroes[0];
+    foe->x = ghost->x + 4.0f; /* within ARENA_GHOST_Q_RANGE */
+    foe->z = ghost->z;
+    int foe_hp_before = foe->hp;
+
+    arena_cast_q(1);
+
+    CHECK(foe->hp < foe_hp_before, "Q damages the foe when in range");
+    CHECK(foe->silenced_ms == ARENA_GHOST_Q_SILENCE_MS, "Q silences the foe on a landed hit");
+    CHECK(ghost->q_cooldown_ms == ARENA_GHOST_Q_COOLDOWN_MS, "Q starts on cooldown after a landed hit");
+}
+
+static void test_ghost_q_out_of_range_whiffs(void) {
+    arena_init_with_heroes(ARENA_HERO_UNICORN, ARENA_HERO_GHOST);
+    ArenaHero *ghost = &arena_state.heroes[1];
+    ArenaHero *foe = &arena_state.heroes[0];
+    foe->x = ghost->x + ARENA_GHOST_Q_RANGE + 5.0f;
+    foe->z = ghost->z;
+    int foe_hp_before = foe->hp;
+
+    arena_cast_q(1);
+
+    CHECK(foe->hp == foe_hp_before, "Q out of range does no damage");
+    CHECK(foe->silenced_ms == 0, "Q out of range does not silence");
+    CHECK(ghost->q_cooldown_ms == 0, "Q out of range does not consume its cooldown");
+}
+
+static void test_silenced_hero_cannot_cast(void) {
+    arena_init_with_heroes(ARENA_HERO_UNICORN, ARENA_HERO_GHOST);
+    ArenaHero *unicorn = &arena_state.heroes[0];
+    unicorn->silenced_ms = 500;
+    float x_before = unicorn->x;
+
+    arena_cast_q(0); /* Unicorn's Q would normally dash it forward */
+
+    CHECK(unicorn->x == x_before, "a silenced hero's Q cast is a no-op");
+    CHECK(unicorn->q_cooldown_ms == 0, "the no-op cast does not consume a cooldown either");
+}
+
+static void test_ghost_w_grants_intangibility_and_expires(void) {
+    arena_init_with_heroes(ARENA_HERO_UNICORN, ARENA_HERO_GHOST);
+    ArenaHero *ghost = &arena_state.heroes[1];
+
+    arena_toggle_w(1);
+    CHECK(ghost->intangible_ms == ARENA_GHOST_W_INTANGIBLE_MS, "W grants intangibility");
+    CHECK(ghost->w_cooldown_ms == ARENA_GHOST_W_COOLDOWN_MS, "W starts on its own cooldown");
+
+    arena_update(ARENA_GHOST_W_INTANGIBLE_MS + 100);
+    CHECK(ghost->intangible_ms == 0, "intangibility expires after its duration");
+}
+
+static void test_intangible_hero_cannot_be_hit(void) {
+    arena_init_with_heroes(ARENA_HERO_UNICORN, ARENA_HERO_GHOST);
+    ArenaHero *unicorn = &arena_state.heroes[0];
+    ArenaHero *ghost = &arena_state.heroes[1];
+    ghost->intangible_ms = 1000;
+    /* Adjacent, in auto-attack range, so resolve_combat would normally hit. */
+    ghost->x = unicorn->x + 0.5f;
+    ghost->z = unicorn->z;
+    int ghost_hp_before = ghost->hp;
+
+    arena_update(16);
+
+    CHECK(ghost->hp == ghost_hp_before, "an intangible hero takes no auto-attack damage");
+}
+
+static void test_ghost_r_zone_damages_foe_over_time(void) {
+    arena_init_with_heroes(ARENA_HERO_UNICORN, ARENA_HERO_GHOST);
+    ArenaHero *ghost = &arena_state.heroes[1];
+    ArenaHero *foe = &arena_state.heroes[0];
+    foe->x = ghost->x + 3.0f;
+    foe->z = ghost->z;
+    int foe_hp_before = foe->hp;
+
+    arena_cast_r(1);
+    CHECK(ghost->r_active_ms == ARENA_GHOST_R_DURATION_MS, "R starts its zone duration on cast");
+    CHECK(ghost->r_cooldown_ms == ARENA_GHOST_R_COOLDOWN_MS, "R starts on its own cooldown after cast");
+
+    /* Ghost occupies owner slot 1 ("the bot"), so this same arena_update
+       call also runs the bot brain, which may chase into melee range and
+       land an auto-attack in the same tick -- an inequality, not exact
+       equality, so this test isn't fragile against that separate, correct
+       behavior. What it actually proves either way: the zone dealt at
+       least its own DPS-worth of damage. */
+    arena_update(1000); /* one full zone tick */
+    CHECK(foe->hp <= foe_hp_before - ARENA_GHOST_R_DPS,
+          "the zone deals at least one DPS-worth of damage per second the foe stands in it");
+}
+
+static void test_ghost_r_zone_stays_fixed_when_foe_moves_away(void) {
+    arena_init_with_heroes(ARENA_HERO_UNICORN, ARENA_HERO_GHOST);
+    ArenaHero *ghost = &arena_state.heroes[1];
+    ArenaHero *foe = &arena_state.heroes[0];
+    foe->x = ghost->x + 3.0f;
+    foe->z = ghost->z;
+
+    arena_cast_r(1);
+    /* Foe steps outside the zone radius right after the cast. */
+    foe->x = ghost->x + ARENA_GHOST_R_RADIUS + 5.0f;
+    int foe_hp_before = foe->hp;
+
+    arena_update(1000);
+
+    CHECK(foe->hp == foe_hp_before, "a foe standing outside the fixed zone takes no zone damage");
+}
+
 int main(void) {
     printf("RED GARDEN arena_game headless smoke test\n\n");
     test_movement_reaches_target();
@@ -263,6 +374,13 @@ int main(void) {
     test_duck_r_bigger_pull_and_damage_than_q();
     test_duck_has_no_w();
     test_hero_dispatch_is_by_hero_not_owner_slot();
+    test_ghost_q_damages_and_silences_in_range();
+    test_ghost_q_out_of_range_whiffs();
+    test_silenced_hero_cannot_cast();
+    test_ghost_w_grants_intangibility_and_expires();
+    test_intangible_hero_cannot_be_hit();
+    test_ghost_r_zone_damages_foe_over_time();
+    test_ghost_r_zone_stays_fixed_when_foe_moves_away();
     printf("\n%s\n", failures == 0 ? "ALL PASS" : "SOME FAILED");
     return failures == 0 ? 0 : 1;
 }

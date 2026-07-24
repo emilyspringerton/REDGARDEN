@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-07-24 (6)
+
+- NORTHSTAR §12 Phase D (S170-32) — third hero, **The Ghost**: Q (skillshot simplified to
+  instant-hit-if-in-range, damage + Silence), W (instant intangibility on its own cooldown, not a
+  toggle), R (fixed-position damage zone, enemy-only side of Recital). First kit needing real
+  status-effect state: new generic `silenced_ms`/`intangible_ms` `ArenaHero` fields (any hero can
+  carry them) and a `hero_is_hittable()` check used everywhere a hit used to just check
+  `foe->alive`. Zone DPS uses a fixed 1000ms tick interval rather than fractional-per-tick math --
+  flagged, but did not fix, a related pre-existing rounding bug in Unicorn's W regen (works in
+  tests that jump a full second, silently truncates to 0 at real 16ms frame rates). Also: a
+  roster-fit audit of the remaining 10 heroes found most (Tree/Pizza/Druid/Doc Wheel/Retrieval
+  Cart/Donkey/TYLER/Flamel) structurally blocked by systems arena doesn't have (grid pressure,
+  allies, multi-unit, cooking) -- only Frog remains a clean fit. 7 new headless tests, all green
+  alongside the full existing suite.
+
 ## 2026-07-24 (5)
 
 - NORTHSTAR §12 Phase D (full roster in arena, S170-31) started: generalized `arena_cast_q`/

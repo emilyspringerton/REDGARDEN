@@ -163,6 +163,14 @@ static int apply_armor(int raw_damage, float armor) {
     return dmg < 1 ? 1 : dmg;
 }
 
+/* hero_is_hittable: The Ghost's W (S170-32) is the first ability in this
+ * arena that needs a "can this hero currently be hit at all" concept,
+ * distinct from just being alive -- used by auto-attacks and ability
+ * damage alike so intangibility means the same thing everywhere. */
+static int hero_is_hittable(const ArenaHero *h) {
+    return h->alive && h->intangible_ms <= 0;
+}
+
 static void resolve_combat(unsigned int dt_ms) {
     ArenaHero *a = &arena_state.heroes[0];
     ArenaHero *b = &arena_state.heroes[1];
@@ -176,11 +184,11 @@ static void resolve_combat(unsigned int dt_ms) {
     if (dist > ARENA_ATTACK_RANGE) return;
 
     if (a->attack_cooldown_ms <= 0) {
-        b->hp -= apply_armor(ARENA_ATTACK_DAMAGE, arena_hero_armor(b));
+        if (hero_is_hittable(b)) b->hp -= apply_armor(ARENA_ATTACK_DAMAGE, arena_hero_armor(b));
         a->attack_cooldown_ms = ARENA_ATTACK_COOLDOWN_MS;
     }
     if (b->attack_cooldown_ms <= 0) {
-        a->hp -= apply_armor(ARENA_ATTACK_DAMAGE, arena_hero_armor(a));
+        if (hero_is_hittable(a)) a->hp -= apply_armor(ARENA_ATTACK_DAMAGE, arena_hero_armor(a));
         b->attack_cooldown_ms = ARENA_ATTACK_COOLDOWN_MS;
     }
     if (a->hp <= 0) { a->hp = 0; a->alive = 0; }
@@ -217,7 +225,7 @@ static void unicorn_cast_q(ArenaHero *h, ArenaHero *foe) {
     h->z = nz;
     h->moving = 0;
 
-    if (foe->alive) {
+    if (hero_is_hittable(foe)) {
         float fdx = foe->x - h->x, fdz = foe->z - h->z;
         if (sqrtf(fdx * fdx + fdz * fdz) <= ARENA_UNICORN_Q_HIT_RADIUS) {
             foe->hp -= apply_armor(ARENA_UNICORN_Q_DAMAGE, arena_hero_armor(foe));
@@ -232,9 +240,9 @@ static void unicorn_cast_q(ArenaHero *h, ArenaHero *foe) {
  * (clamped so it can't overshoot past the Duck) and deal damage, only if
  * the foe starts out within max_range. Returns 1 if it landed (so the
  * caller only consumes the cooldown on an actual hit, not a whiff), 0 if
- * the foe was out of range. */
+ * the foe was out of range or currently unhittable (e.g. Ghost's W). */
 static int duck_pull_foe(ArenaHero *duck, ArenaHero *foe, float pull_dist, int damage, float max_range) {
-    if (!foe->alive) return 0;
+    if (!hero_is_hittable(foe)) return 0;
     float dx = duck->x - foe->x;
     float dz = duck->z - foe->z;
     float dist = sqrtf(dx * dx + dz * dz);
@@ -249,11 +257,27 @@ static int duck_pull_foe(ArenaHero *duck, ArenaHero *foe, float pull_dist, int d
     return 1;
 }
 
+/* ghost_cast_q: Alien Frequency, simplified to an instant hit-if-in-range
+ * check rather than a simulated travelling projectile -- same "instant,
+ * not animated" simplification precedent as Duck's pull abilities. Damages
+ * and silences the foe if it's hittable and within range. Returns 1 if it
+ * landed (cooldown only consumed on a real hit, same convention as
+ * duck_pull_foe), 0 on a whiff. */
+static int ghost_cast_q(ArenaHero *ghost, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return 0;
+    float dx = foe->x - ghost->x, dz = foe->z - ghost->z;
+    if (sqrtf(dx * dx + dz * dz) > ARENA_GHOST_Q_RANGE) return 0;
+    foe->hp -= apply_armor(ARENA_GHOST_Q_DAMAGE, arena_hero_armor(foe));
+    if (foe->hp <= 0) { foe->hp = 0; foe->alive = 0; }
+    foe->silenced_ms = ARENA_GHOST_Q_SILENCE_MS;
+    return 1;
+}
+
 void arena_cast_q(int owner) {
     if (owner < 0 || owner > 1) return;
     ArenaHero *h = &arena_state.heroes[owner];
     ArenaHero *foe = &arena_state.heroes[owner == 0 ? 1 : 0];
-    if (!h->alive || h->q_cooldown_ms > 0) return;
+    if (!h->alive || h->silenced_ms > 0 || h->q_cooldown_ms > 0) return;
 
     switch (h->hero_id) {
     case ARENA_HERO_UNICORN:
@@ -264,25 +288,44 @@ void arena_cast_q(int owner) {
             h->q_cooldown_ms = ARENA_DUCK_Q_COOLDOWN_MS;
         }
         break;
+    case ARENA_HERO_GHOST:
+        if (ghost_cast_q(h, foe)) {
+            h->q_cooldown_ms = ARENA_GHOST_Q_COOLDOWN_MS;
+        }
+        break;
     }
 }
 
 void arena_toggle_w(int owner) {
     if (owner < 0 || owner > 1) return;
     ArenaHero *h = &arena_state.heroes[owner];
-    if (!h->alive) return;
-    /* Only The Unicorn has a W in this arena (Spaghetti Vent). The Duck's
-       W (Government Clearance) needs objective structures that don't exist
-       here -- no-op for any other hero, not a crash or a silent wrong kit. */
-    if (h->hero_id != ARENA_HERO_UNICORN) return;
-    h->w_active = !h->w_active;
+    if (!h->alive || h->silenced_ms > 0) return;
+
+    switch (h->hero_id) {
+    case ARENA_HERO_UNICORN:
+        h->w_active = !h->w_active;
+        break;
+    case ARENA_HERO_GHOST:
+        /* Not a Ghost: an instant-use buff on its own cooldown, not a
+           toggle -- reuses the W slot but isn't a hold-on/hold-off state
+           like Unicorn's regen. */
+        if (h->w_cooldown_ms > 0) return;
+        h->intangible_ms = ARENA_GHOST_W_INTANGIBLE_MS;
+        h->w_cooldown_ms = ARENA_GHOST_W_COOLDOWN_MS;
+        break;
+    default:
+        /* The Duck's W (Government Clearance) needs objective structures
+           that don't exist here -- no-op for any hero without a real W in
+           this arena, not a crash or a silent wrong kit. */
+        break;
+    }
 }
 
 void arena_cast_r(int owner) {
     if (owner < 0 || owner > 1) return;
     ArenaHero *h = &arena_state.heroes[owner];
     ArenaHero *foe = &arena_state.heroes[owner == 0 ? 1 : 0];
-    if (!h->alive || h->r_cooldown_ms > 0) return;
+    if (!h->alive || h->silenced_ms > 0 || h->r_cooldown_ms > 0) return;
 
     switch (h->hero_id) {
     case ARENA_HERO_UNICORN:
@@ -294,21 +337,70 @@ void arena_cast_r(int owner) {
             h->r_cooldown_ms = ARENA_DUCK_R_COOLDOWN_MS;
         }
         break;
+    case ARENA_HERO_GHOST:
+        /* Recital: only the enemy-damage side is implemented -- the
+           ally-heal side (docs/HEROES_VS0.md: "same zone, opposite effect
+           depending on team") has no target in a 1v1, flagged not faked. */
+        h->r_zone_x = h->x;
+        h->r_zone_z = h->z;
+        h->r_zone_tick_ms = 0;
+        h->r_active_ms = ARENA_GHOST_R_DURATION_MS;
+        h->r_cooldown_ms = ARENA_GHOST_R_COOLDOWN_MS;
+        break;
     }
 }
 
-static void tick_hero_kit(ArenaHero *h, unsigned int dt_ms) {
+static void tick_hero_kit(ArenaHero *h, ArenaHero *foe, unsigned int dt_ms) {
+    /* Cooldowns and status effects (silence, intangibility) are generic --
+       any hero can carry them, not just whichever kit currently applies
+       them (S170-32). */
     if (h->q_cooldown_ms > 0) h->q_cooldown_ms -= (int)dt_ms;
+    if (h->w_cooldown_ms > 0) h->w_cooldown_ms -= (int)dt_ms;
     if (h->r_cooldown_ms > 0) h->r_cooldown_ms -= (int)dt_ms;
-    if (h->hero_id != ARENA_HERO_UNICORN) return; /* rest is Unicorn-only state */
-    if (h->r_active_ms > 0) {
-        h->r_active_ms -= (int)dt_ms;
-        if (h->r_active_ms < 0) h->r_active_ms = 0;
+    if (h->silenced_ms > 0) {
+        h->silenced_ms -= (int)dt_ms;
+        if (h->silenced_ms < 0) h->silenced_ms = 0;
     }
-    if (h->w_active && h->alive) {
-        float regen = ARENA_UNICORN_W_REGEN_PER_SEC * ((float)dt_ms / 1000.0f);
-        h->hp += (int)regen;
-        if (h->hp > h->max_hp) h->hp = h->max_hp;
+    if (h->intangible_ms > 0) {
+        h->intangible_ms -= (int)dt_ms;
+        if (h->intangible_ms < 0) h->intangible_ms = 0;
+    }
+
+    switch (h->hero_id) {
+    case ARENA_HERO_UNICORN:
+        if (h->r_active_ms > 0) {
+            h->r_active_ms -= (int)dt_ms;
+            if (h->r_active_ms < 0) h->r_active_ms = 0;
+        }
+        if (h->w_active && h->alive) {
+            float regen = ARENA_UNICORN_W_REGEN_PER_SEC * ((float)dt_ms / 1000.0f);
+            h->hp += (int)regen;
+            if (h->hp > h->max_hp) h->hp = h->max_hp;
+        }
+        break;
+    case ARENA_HERO_GHOST:
+        if (h->r_active_ms > 0) {
+            h->r_active_ms -= (int)dt_ms;
+            if (h->r_active_ms < 0) h->r_active_ms = 0;
+            /* Fixed-interval zone tick (once per 1000ms of accumulated
+               time in the zone's duration), not fractional-per-tick DPS --
+               correct at any real frame rate, same reasoning as the match
+               event log's snapshot interval elsewhere in this codebase. */
+            h->r_zone_tick_ms += (int)dt_ms;
+            while (h->r_zone_tick_ms >= 1000) {
+                h->r_zone_tick_ms -= 1000;
+                if (hero_is_hittable(foe)) {
+                    float dx = foe->x - h->r_zone_x, dz = foe->z - h->r_zone_z;
+                    if (sqrtf(dx * dx + dz * dz) <= ARENA_GHOST_R_RADIUS) {
+                        foe->hp -= apply_armor(ARENA_GHOST_R_DPS, arena_hero_armor(foe));
+                        if (foe->hp <= 0) { foe->hp = 0; foe->alive = 0; }
+                    }
+                }
+            }
+        }
+        break;
+    default:
+        break;
     }
 }
 
@@ -333,6 +425,13 @@ static void bot_cast_kit_if_ready(ArenaHero *bot, ArenaHero *foe) {
     case ARENA_HERO_UNICORN:
         if (bot->q_cooldown_ms <= 0 && dist <= ARENA_UNICORN_Q_HIT_RADIUS * 2.0f) {
             arena_cast_q(bot->owner);
+        }
+        break;
+    case ARENA_HERO_GHOST:
+        if (bot->q_cooldown_ms <= 0 && dist <= ARENA_GHOST_Q_RANGE) {
+            arena_cast_q(bot->owner);
+        } else if (bot->r_cooldown_ms <= 0 && dist <= ARENA_GHOST_R_RADIUS) {
+            arena_cast_r(bot->owner);
         }
         break;
     }
@@ -363,8 +462,8 @@ void arena_update(unsigned int dt_ms) {
     update_hero_motion(&arena_state.heroes[0], dt_sec);
     update_hero_motion(&arena_state.heroes[1], dt_sec);
     resolve_combat(dt_ms);
-    tick_hero_kit(&arena_state.heroes[0], dt_ms);
-    tick_hero_kit(&arena_state.heroes[1], dt_ms);
+    tick_hero_kit(&arena_state.heroes[0], &arena_state.heroes[1], dt_ms);
+    tick_hero_kit(&arena_state.heroes[1], &arena_state.heroes[0], dt_ms);
     bot_cast_kit_if_ready(&arena_state.heroes[1], &arena_state.heroes[0]);
 
     if (!arena_state.heroes[0].alive) arena_state.winner = 2;

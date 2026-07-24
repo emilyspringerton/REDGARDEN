@@ -440,9 +440,42 @@ Phase D's explicit "both sides" requirement. 6 new headless tests, including one
 works from *either* owner slot (Unicorn cast from slot 1), all green alongside the full existing
 suite (`test_arena.sh`, `test_10_bots.sh`).
 
-**Not done yet — the other 10 heroes** (Donkey, Ghost, Frog, Tree, Pizza, Retrieval Cart, Doc
-Wheel, TYLER, Flamel, Druid). Each is its own follow-on pass, not bundled into this one — "not all
-at once, obviously in phases" applies inside Phase D too.
+**Third hero: The Ghost, plus a roster-fit audit (2026-07-24, S170-32).** Before picking the next
+hero, checked all 10 remaining roster entries against arena's actual structural constraints (1v1
+only, self/foe targeting only — no allies, no `GridCell`/`alignment_pressure` territory system, no
+multi-unit-per-player) rather than assuming every hero fits the way Unicorn/Duck did:
+
+- **Blocked on the RED GARDEN grid** (Tree, Pizza, Druid, half of Doc Wheel) — their identity is
+  `alignment_pressure`/`GridCell` interaction, which `arena_game.h` (`ArenaNode`, not `GridCell`)
+  doesn't have.
+- **Blocked on needing allies** (Doc Wheel fully; Frog's W partially).
+- **Blocked on not being a piloted hero** (Retrieval Cart — "no active-use kit at all by design";
+  Donkey — automatic HP-triggered unfold, never directly commanded).
+- **Blocked on multi-unit-per-player** (TYLER — Meepo-style clones; `heroes[2]` is one unit per side).
+- **Blocked on the cooking system** (Flamel — "entire kit is the cooking system made literal").
+- **Actually fits**: Ghost and Frog. This audit is a real finding about arena's ceiling as a
+  full-roster testbed, kept here even independent of Ghost's own build below.
+
+Wired **The Ghost**'s Q (Alien Frequency: skillshot simplified to instant-hit-if-in-range, damage
++ Silence) and W (Not a Ghost: instant intangibility on its own cooldown, not a toggle like
+Unicorn's) and R (Recital: fixed-position zone, enemy-damage side only — the ally-heal side has no
+target in 1v1, flagged not faked). Passive (Mid-Piano, silent undodgeable casts) is a cast-
+animation/UI concept with nothing to simulate here — skipped, flagged.
+
+This is arena's first kit needing real status-effect state rather than just cooldowns/toggles:
+added `silenced_ms` (blocks Q/W/R casts) and `intangible_ms` (blocks auto-attacks and ability
+damage alike, via a new `hero_is_hittable()` check used everywhere a hit used to just check
+`foe->alive`) as generic `ArenaHero` fields, not Ghost-specific ones — any future kit can apply
+them to any hero. The zone's damage-over-time uses a fixed-interval tick (once per accumulated
+1000ms, not fractional-per-tick DPS) so it's correct at any real frame rate — notably, this
+sidesteps a real rounding bug already latent in Unicorn's W regen (which computes fractional HP
+per 16ms tick and truncates to 0 almost every tick in real gameplay, only "working" in tests that
+advance time in one big 1000ms step); that pre-existing bug is flagged here, not fixed, since
+fixing it is unrelated to this pass's scope.
+
+7 new headless tests, all green alongside the full existing suite. **Not done yet — Frog** (the
+other hero that fits arena's constraints) and **the 9 heroes structurally blocked above**. Each is
+its own follow-on pass — "not all at once, obviously in phases" applies inside Phase D too.
 
 **Phase E — Game AI: reuse existing org tech, don't invent a parallel stack.** Founder: "using the
 full depth breadth and width of einhorn ai tech for games" → "incorporate all of the tech into the

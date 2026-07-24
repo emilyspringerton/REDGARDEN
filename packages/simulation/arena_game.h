@@ -16,6 +16,7 @@
 typedef enum {
     ARENA_HERO_UNICORN = 0,
     ARENA_HERO_DUCK = 1,
+    ARENA_HERO_GHOST = 2,
 } ArenaHeroID;
 
 /* The Unicorn — first real hero kit wired in (S170-18). */
@@ -42,6 +43,24 @@ typedef enum {
 #define ARENA_DUCK_R_RANGE          9.0f
 #define ARENA_DUCK_R_COOLDOWN_MS    18000
 
+/* The Ghost — third hero kit (S170-32). First kit needing real status-effect
+ * state (silence, intangibility) rather than just cooldowns/toggles. R's
+ * ally-heal side (docs/HEROES_VS0.md: "same zone, opposite effect depending
+ * on team") has no target in a 1v1 -- only the enemy-damage side is
+ * implemented, flagged not faked. Passive (Mid-Piano, silent undodgeable
+ * casts) is a cast-animation/UI concept with no gameplay effect to model in
+ * this arena -- skipped, flagged, same reasoning as other UI-only passives. */
+#define ARENA_GHOST_Q_RANGE         7.0f  /* Alien Frequency: skillshot range */
+#define ARENA_GHOST_Q_DAMAGE        9
+#define ARENA_GHOST_Q_SILENCE_MS    1500
+#define ARENA_GHOST_Q_COOLDOWN_MS   4500
+#define ARENA_GHOST_W_INTANGIBLE_MS 1500 /* Not a Ghost */
+#define ARENA_GHOST_W_COOLDOWN_MS   10000
+#define ARENA_GHOST_R_RADIUS        4.0f  /* Recital: zone stays fixed where cast */
+#define ARENA_GHOST_R_DURATION_MS   4000
+#define ARENA_GHOST_R_DPS           6     /* damage/sec to enemies standing in the zone */
+#define ARENA_GHOST_R_COOLDOWN_MS   20000
+
 typedef struct {
     float x, z;
     float target_x, target_z;
@@ -57,9 +76,19 @@ typedef struct {
      * -- simplest thing that works for a 2-kit roster; revisit if a future
      * kit needs state shape these fields can't express. */
     int q_cooldown_ms;
-    int w_active;      /* Unicorn's Spaghetti Vent toggle; unused by Duck */
+    int w_active;      /* Unicorn's Spaghetti Vent toggle; unused by Duck/Ghost */
+    int w_cooldown_ms; /* Ghost's Not a Ghost; Unicorn's W is a free toggle and doesn't use this */
     int r_cooldown_ms;
-    int r_active_ms;   /* Unicorn's Full Disclosure armor-double duration; unused by Duck */
+    int r_active_ms;   /* Unicorn's armor-double / Ghost's Recital zone duration; unused by Duck */
+    float r_zone_x, r_zone_z; /* Ghost's Recital: fixed zone position at cast time */
+    int r_zone_tick_ms; /* Ghost's Recital: counts up to 1000ms, then ticks one DPS-worth of damage --
+                          * a fixed-interval tick rather than fractional-per-tick accumulation, so it
+                          * behaves correctly at any real frame rate, not just in a single big test step. */
+    /* Status effects -- generic, any hero's kit can apply these to any
+     * other hero, not just Ghost's own state (S170-32 is the first kit to
+     * apply them, but the fields aren't Ghost-specific). */
+    int silenced_ms;    /* > 0: cannot cast Q/W/R */
+    int intangible_ms;  /* > 0: cannot be hit by attacks or ability damage */
 } ArenaHero;
 
 typedef struct {
