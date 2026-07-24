@@ -420,10 +420,29 @@ same standing constraint) couldn't be run end-to-end on this box.
 log file that's still being appended to, not just a completed one).** Both are real, separate next
 steps within Phase C, not silently folded into this pass.
 
-**Phase D — Full roster in arena.** Extends S170-18's proof-of-concept (The Unicorn, player-hero-
-only, one kit) to the rest of `docs/HEROES_VS0.md`'s roster, both sides (bot included) — the
-actual "iterate on the MOBA version with the roster" ask, once the integration path S170-18 proved
-is trusted enough to repeat ten more times.
+**Phase D — Full roster in arena. Started 2026-07-24 (S170-31), second hero: The Duck.** Extends
+S170-18's proof-of-concept (The Unicorn, player-hero-only, one kit) to the rest of
+`docs/HEROES_VS0.md`'s roster, both sides (bot included) — the actual "iterate on the MOBA version
+with the roster" ask, once the integration path S170-18 proved is trusted enough to repeat ten
+more times.
+
+**Done — kit dispatch generalized, second hero wired, both sides proven.** `ArenaHero` gained a
+`hero_id` field; `arena_cast_q`/`arena_toggle_w`/`arena_cast_r` now switch on it instead of
+S170-18's hardcoded `owner == 0` check — either owner slot can carry either hero. **The Duck**'s
+Q (Telekinetic Yank — pull the foe toward the Duck + AD damage) and R (Total Telekinesis — bigger
+pull + damage, longer cooldown) are wired; its **W (Government Clearance)** needs objective
+structures that don't exist in this 1v1 arena, and its **E (Chosen One)** triggers on a killing
+blow that would also end the match under this arena's win condition, giving the buff a zero-length
+observable window — both skipped and flagged, not faked. `arena_init()` now defaults to
+player=Unicorn, bot=Duck, with simple heuristic bot logic (cast Q/R when off cooldown and the foe
+is in range) — the bot side has a real kit for the first time, not just plain melee, satisfying
+Phase D's explicit "both sides" requirement. 6 new headless tests, including one proving dispatch
+works from *either* owner slot (Unicorn cast from slot 1), all green alongside the full existing
+suite (`test_arena.sh`, `test_10_bots.sh`).
+
+**Not done yet — the other 10 heroes** (Donkey, Ghost, Frog, Tree, Pizza, Retrieval Cart, Doc
+Wheel, TYLER, Flamel, Druid). Each is its own follow-on pass, not bundled into this one — "not all
+at once, obviously in phases" applies inside Phase D too.
 
 **Phase E — Game AI: reuse existing org tech, don't invent a parallel stack.** Founder: "using the
 full depth breadth and width of einhorn ai tech for games" → "incorporate all of the tech into the

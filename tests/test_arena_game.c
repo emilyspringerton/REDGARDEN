@@ -153,10 +153,96 @@ static void test_unicorn_armor_reduces_incoming_damage(void) {
     arena_init();
     ArenaHero *h = &arena_state.heroes[0];
     ArenaHero *bot = &arena_state.heroes[1];
-    /* Bot only has plain melee (S170-18 scope) -- confirm the hero's armor
-       actually reduces what it takes, not just that armor is nonzero. */
+    /* Default roster is Unicorn (player) vs Duck (bot, S170-31) -- Duck has
+       no passive armor, same numeric result as the old "plain melee" bot
+       had, but for a different reason now (a real kit with zero armor, not
+       an absence of a kit). Confirm the hero's armor actually reduces what
+       it takes, not just that armor is nonzero. */
     CHECK(arena_hero_armor(h) > 0.0f, "The Unicorn has nonzero passive armor");
-    CHECK(arena_hero_armor(bot) == 0.0f, "the bot has no armor this pass -- plain melee only");
+    CHECK(arena_hero_armor(bot) == 0.0f, "The Duck has no passive armor");
+}
+
+/* --- The Duck's kit (docs/HEROES_VS0.md, EMILY/BACKLOG.md S170-31) --- */
+
+static void test_duck_q_pulls_foe_and_damages(void) {
+    arena_init(); /* player=Unicorn, bot=Duck */
+    ArenaHero *duck = &arena_state.heroes[1];
+    ArenaHero *foe = &arena_state.heroes[0];
+    foe->x = duck->x + 4.0f; /* within ARENA_DUCK_Q_RANGE */
+    foe->z = duck->z;
+    float foe_x_before = foe->x;
+    int foe_hp_before = foe->hp;
+
+    arena_cast_q(1);
+
+    CHECK(foe->x < foe_x_before, "Q pulls the foe toward the Duck");
+    CHECK(foe->hp < foe_hp_before, "Q damages the foe when the pull lands in range");
+    CHECK(duck->q_cooldown_ms == ARENA_DUCK_Q_COOLDOWN_MS, "Q starts on cooldown after cast");
+}
+
+static void test_duck_q_out_of_range_whiffs(void) {
+    arena_init();
+    ArenaHero *duck = &arena_state.heroes[1];
+    ArenaHero *foe = &arena_state.heroes[0];
+    foe->x = duck->x + ARENA_DUCK_Q_RANGE + 5.0f; /* well beyond range */
+    foe->z = duck->z;
+    int foe_hp_before = foe->hp;
+
+    arena_cast_q(1);
+
+    CHECK(foe->hp == foe_hp_before, "Q out of range does no damage");
+    CHECK(duck->q_cooldown_ms == 0, "Q out of range does not consume its cooldown -- it whiffed, not cast");
+}
+
+static void test_duck_q_never_pulls_past_the_duck(void) {
+    arena_init();
+    ArenaHero *duck = &arena_state.heroes[1];
+    ArenaHero *foe = &arena_state.heroes[0];
+    /* Foe closer than the pull distance -- must stop at the Duck, not fly past it. */
+    foe->x = duck->x + 1.0f;
+    foe->z = duck->z;
+
+    arena_cast_q(1);
+
+    CHECK(fabsf(foe->x - duck->x) < 0.01f, "a close foe is pulled to the Duck's position, not past it");
+}
+
+static void test_duck_r_bigger_pull_and_damage_than_q(void) {
+    /* Both sides Duck (no armor on either), so the damage dealt isn't
+       confounded by the default foe (Unicorn) having passive armor. */
+    arena_init_with_heroes(ARENA_HERO_DUCK, ARENA_HERO_DUCK);
+    ArenaHero *duck = &arena_state.heroes[1];
+    ArenaHero *foe = &arena_state.heroes[0];
+    foe->x = duck->x + 8.0f; /* within R's range, beyond Q's */
+    foe->z = duck->z;
+    int foe_hp_before = foe->hp;
+
+    arena_cast_r(1);
+
+    CHECK(foe->hp == foe_hp_before - ARENA_DUCK_R_DAMAGE, "R deals its own (larger) damage amount");
+    CHECK(duck->r_cooldown_ms == ARENA_DUCK_R_COOLDOWN_MS, "R starts on its own cooldown after cast");
+}
+
+static void test_duck_has_no_w(void) {
+    arena_init();
+    ArenaHero *duck = &arena_state.heroes[1];
+    /* Government Clearance needs objective structures that don't exist in
+       this arena -- toggling W for a Duck must no-op, not crash or silently
+       borrow Unicorn's regen-toggle behavior. */
+    arena_toggle_w(1);
+    CHECK(duck->w_active == 0, "toggling W for The Duck is a no-op -- it has no W in this arena");
+}
+
+static void test_hero_dispatch_is_by_hero_not_owner_slot(void) {
+    /* S170-31's whole point: kit dispatch generalized away from S170-18's
+       "owner 0 == Unicorn" hardcoding. Swap the roster and confirm Unicorn's
+       kit still works correctly from owner slot 1. */
+    arena_init_with_heroes(ARENA_HERO_DUCK, ARENA_HERO_UNICORN);
+    ArenaHero *unicorn = &arena_state.heroes[1];
+    float base_armor = arena_hero_armor(unicorn);
+    arena_cast_r(1);
+    CHECK(arena_hero_armor(unicorn) == base_armor * 2.0f,
+          "Unicorn's R still doubles armor when Unicorn is in owner slot 1, not slot 0");
 }
 
 int main(void) {
@@ -171,6 +257,12 @@ int main(void) {
     test_unicorn_w_regen_toggle();
     test_unicorn_r_doubles_armor_temporarily();
     test_unicorn_armor_reduces_incoming_damage();
+    test_duck_q_pulls_foe_and_damages();
+    test_duck_q_out_of_range_whiffs();
+    test_duck_q_never_pulls_past_the_duck();
+    test_duck_r_bigger_pull_and_damage_than_q();
+    test_duck_has_no_w();
+    test_hero_dispatch_is_by_hero_not_owner_slot();
     printf("\n%s\n", failures == 0 ? "ALL PASS" : "SOME FAILED");
     return failures == 0 ? 0 : 1;
 }

@@ -8,10 +8,17 @@
 #define ARENA_ATTACK_COOLDOWN_MS 700
 #define ARENA_NODE_COUNT 2
 
-/* The Unicorn (docs/HEROES_VS0.md) — first real hero kit wired into the
- * arena demo, owner 0 (player) only for this pass. Bot (owner 1) stays
- * plain melee; this proves the integration path, not the full roster
- * (EMILY/BACKLOG.md S170-18). */
+/* Hero roster (docs/HEROES_VS0.md), NORTHSTAR §12 Phase D. hero_id
+ * generalizes kit dispatch away from S170-18's "owner 0 == The Unicorn"
+ * hardcoding -- either owner slot can carry either hero now. Growing this
+ * list is the actual "full roster" work; ten more heroes from the doc are
+ * follow-on passes, not this one (EMILY/BACKLOG.md S170-31). */
+typedef enum {
+    ARENA_HERO_UNICORN = 0,
+    ARENA_HERO_DUCK = 1,
+} ArenaHeroID;
+
+/* The Unicorn — first real hero kit wired in (S170-18). */
 #define ARENA_UNICORN_ARMOR         4    /* passive: Chassis Claim, flat dmg reduction */
 #define ARENA_UNICORN_Q_DASH_DIST   4.0f /* Diagnostic Charge */
 #define ARENA_UNICORN_Q_DAMAGE      12
@@ -20,6 +27,20 @@
 #define ARENA_UNICORN_W_REGEN_PER_SEC 6  /* Spaghetti Vent, while toggled on */
 #define ARENA_UNICORN_R_COOLDOWN_MS 15000
 #define ARENA_UNICORN_R_DURATION_MS 3000 /* Full Disclosure: armor doubled */
+
+/* The Duck — second hero kit (S170-31). Q/R only: W (Government Clearance)
+ * needs towers/objective structures that don't exist in this 1v1 arena, and
+ * E (Chosen One) triggers on a killing blow, but arena's win condition ends
+ * the match on that same kill -- the buff window and match-end coincide, so
+ * it would have zero observable effect here. Both skipped, not faked. */
+#define ARENA_DUCK_Q_PULL_DIST      5.0f /* Telekinetic Yank: how far the foe gets pulled */
+#define ARENA_DUCK_Q_DAMAGE         10
+#define ARENA_DUCK_Q_RANGE          6.0f /* max distance the yank can reach */
+#define ARENA_DUCK_Q_COOLDOWN_MS    5000
+#define ARENA_DUCK_R_PULL_DIST      9.0f /* Total Telekinesis: bigger yank */
+#define ARENA_DUCK_R_DAMAGE         20
+#define ARENA_DUCK_R_RANGE          9.0f
+#define ARENA_DUCK_R_COOLDOWN_MS    18000
 
 typedef struct {
     float x, z;
@@ -30,11 +51,15 @@ typedef struct {
     int attack_cooldown_ms;
     int owner; /* 0 = player, 1 = bot */
     int alive;
-    /* Unicorn kit state (meaningful for owner 0 only this pass) */
+    ArenaHeroID hero_id;
+    /* Generic ability state, shared field names across kits (Unicorn's
+     * Q/W/R and Duck's Q/R both use these) rather than one struct per hero
+     * -- simplest thing that works for a 2-kit roster; revisit if a future
+     * kit needs state shape these fields can't express. */
     int q_cooldown_ms;
-    int w_active;      /* Spaghetti Vent toggle */
+    int w_active;      /* Unicorn's Spaghetti Vent toggle; unused by Duck */
     int r_cooldown_ms;
-    int r_active_ms;   /* remaining duration of Full Disclosure's armor-double */
+    int r_active_ms;   /* Unicorn's Full Disclosure armor-double duration; unused by Duck */
 } ArenaHero;
 
 typedef struct {
@@ -49,15 +74,22 @@ typedef struct {
 
 extern ArenaState arena_state;
 
+/* arena_init defaults to player=Unicorn, bot=Duck (S170-31) -- both slots
+ * carry a real kit now, proving Phase D's "both sides" requirement, not
+ * just a second player-selectable option. arena_init_with_heroes lets a
+ * caller (tests, a future hero-select menu) pick explicitly. */
 void arena_init(void);
+void arena_init_with_heroes(ArenaHeroID player_hero, ArenaHeroID bot_hero);
 void arena_update(unsigned int dt_ms);
 void arena_set_move_target(int owner, float x, float z);
 void arena_bot_tick(unsigned int dt_ms);
 
-/* The Unicorn's kit — owner 0 (player) only this pass. No-ops if on cooldown. */
+/* Kit casts dispatch on the hero's hero_id, not a hardcoded owner check
+ * (S170-31 generalized this from S170-18's Unicorn-only version). No-ops
+ * if the hero's kit doesn't have that ability, or if it's on cooldown. */
 void arena_cast_q(int owner);
 void arena_toggle_w(int owner);
 void arena_cast_r(int owner);
-float arena_hero_armor(const ArenaHero *h); /* effective armor, incl. R's buff */
+float arena_hero_armor(const ArenaHero *h); /* effective armor, incl. Unicorn R's buff */
 
 #endif

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-07-24 (5)
+
+- NORTHSTAR §12 Phase D (full roster in arena, S170-31) started: generalized `arena_cast_q`/
+  `arena_toggle_w`/`arena_cast_r` to dispatch on a new `ArenaHero.hero_id` field instead of
+  S170-18's hardcoded `owner == 0` check, then wired **The Duck** as the second kit (Q/R only --
+  its W needs objectives that don't exist here, its E's trigger coincides with match-end, both
+  flagged and skipped). `arena_init()` now defaults player=Unicorn, bot=Duck with simple
+  heuristic bot-casting, giving the bot side a real kit for the first time. 6 new headless tests
+  (including cross-slot dispatch verification), all green alongside the full existing suite.
+  10 heroes remain, each a separate follow-on pass.
+
 ## 2026-07-24 (4)
 
 - NORTHSTAR §12 Phase C (observer mode, S170-30) started, arena half: new

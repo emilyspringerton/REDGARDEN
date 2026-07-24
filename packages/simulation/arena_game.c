@@ -55,7 +55,7 @@ static void bot_brain_forward(const float in[4], float out[2]) {
     }
 }
 
-void arena_init(void) {
+void arena_init_with_heroes(ArenaHeroID player_hero, ArenaHeroID bot_hero) {
     memset(&arena_state, 0, sizeof(arena_state));
 
     arena_state.heroes[0].x = -6.0f;
@@ -65,6 +65,7 @@ void arena_init(void) {
     arena_state.heroes[0].hp = arena_state.heroes[0].max_hp = 100;
     arena_state.heroes[0].owner = 0;
     arena_state.heroes[0].alive = 1;
+    arena_state.heroes[0].hero_id = player_hero;
 
     arena_state.heroes[1].x = 6.0f;
     arena_state.heroes[1].z = 0.0f;
@@ -73,6 +74,7 @@ void arena_init(void) {
     arena_state.heroes[1].hp = arena_state.heroes[1].max_hp = 100;
     arena_state.heroes[1].owner = 1;
     arena_state.heroes[1].alive = 1;
+    arena_state.heroes[1].hero_id = bot_hero;
 
     arena_state.nodes[0].x = -4.0f;
     arena_state.nodes[0].z = 4.0f;
@@ -80,6 +82,13 @@ void arena_init(void) {
     arena_state.nodes[1].z = -4.0f;
 
     arena_state.winner = 0;
+}
+
+void arena_init(void) {
+    /* Player=Unicorn, bot=Duck: both slots carry a real kit (S170-31),
+     * proving Phase D's "both sides" requirement rather than just adding a
+     * second player-selectable option. */
+    arena_init_with_heroes(ARENA_HERO_UNICORN, ARENA_HERO_DUCK);
 }
 
 void arena_set_move_target(int owner, float x, float z) {
@@ -139,10 +148,11 @@ static void update_hero_motion(ArenaHero *h, float dt_sec) {
 }
 
 /* arena_hero_armor: effective armor including Full Disclosure's temporary
- * double. Only owner 0 (The Unicorn) has any armor this pass -- the bot
- * (owner 1) stays plain melee, per S170-18's scope. */
+ * double. Only The Unicorn has passive armor (S170-18); The Duck (S170-31)
+ * has none -- dispatch is by hero_id now, not by owner slot, so either side
+ * gets Unicorn's armor if either side is playing Unicorn. */
 float arena_hero_armor(const ArenaHero *h) {
-    if (h->owner != 0) return 0.0f;
+    if (h->hero_id != ARENA_HERO_UNICORN) return 0.0f;
     float armor = (float)ARENA_UNICORN_ARMOR;
     if (h->r_active_ms > 0) armor *= 2.0f;
     return armor;
@@ -177,14 +187,11 @@ static void resolve_combat(unsigned int dt_ms) {
     if (b->hp <= 0) { b->hp = 0; b->alive = 0; }
 }
 
-/* --- The Unicorn's kit --- */
+/* --- Kit dispatch (S170-31 generalized this from S170-18's Unicorn-only,
+   owner-hardcoded version -- everything below dispatches on hero_id, so
+   either owner slot can carry either hero). --- */
 
-void arena_cast_q(int owner) {
-    if (owner != 0) return; /* bot doesn't have this kit yet, S170-18 */
-    ArenaHero *h = &arena_state.heroes[owner];
-    ArenaHero *foe = &arena_state.heroes[owner == 0 ? 1 : 0];
-    if (!h->alive || h->q_cooldown_ms > 0) return;
-
+static void unicorn_cast_q(ArenaHero *h, ArenaHero *foe) {
     /* Dash toward the current move target if moving, else toward the foe --
        a dash ability needs a direction, and "toward whatever you last
        clicked, or the enemy if you didn't" is the simplest honest default. */
@@ -220,25 +227,80 @@ void arena_cast_q(int owner) {
     h->q_cooldown_ms = ARENA_UNICORN_Q_COOLDOWN_MS;
 }
 
+/* duck_pull_foe: shared logic for Telekinetic Yank (Q) and the bigger
+ * Total Telekinesis (R) -- both pull the foe toward the Duck by pull_dist
+ * (clamped so it can't overshoot past the Duck) and deal damage, only if
+ * the foe starts out within max_range. Returns 1 if it landed (so the
+ * caller only consumes the cooldown on an actual hit, not a whiff), 0 if
+ * the foe was out of range. */
+static int duck_pull_foe(ArenaHero *duck, ArenaHero *foe, float pull_dist, int damage, float max_range) {
+    if (!foe->alive) return 0;
+    float dx = duck->x - foe->x;
+    float dz = duck->z - foe->z;
+    float dist = sqrtf(dx * dx + dz * dz);
+    if (dist > max_range) return 0; /* out of range -- no whiff-damage, no partial pull */
+    if (dist > 0.01f) {
+        float pull = pull_dist < dist ? pull_dist : dist; /* never pull the foe past the Duck */
+        foe->x += dx / dist * pull;
+        foe->z += dz / dist * pull;
+    }
+    foe->hp -= apply_armor(damage, arena_hero_armor(foe));
+    if (foe->hp <= 0) { foe->hp = 0; foe->alive = 0; }
+    return 1;
+}
+
+void arena_cast_q(int owner) {
+    if (owner < 0 || owner > 1) return;
+    ArenaHero *h = &arena_state.heroes[owner];
+    ArenaHero *foe = &arena_state.heroes[owner == 0 ? 1 : 0];
+    if (!h->alive || h->q_cooldown_ms > 0) return;
+
+    switch (h->hero_id) {
+    case ARENA_HERO_UNICORN:
+        unicorn_cast_q(h, foe);
+        break;
+    case ARENA_HERO_DUCK:
+        if (duck_pull_foe(h, foe, ARENA_DUCK_Q_PULL_DIST, ARENA_DUCK_Q_DAMAGE, ARENA_DUCK_Q_RANGE)) {
+            h->q_cooldown_ms = ARENA_DUCK_Q_COOLDOWN_MS;
+        }
+        break;
+    }
+}
+
 void arena_toggle_w(int owner) {
-    if (owner != 0) return;
+    if (owner < 0 || owner > 1) return;
     ArenaHero *h = &arena_state.heroes[owner];
     if (!h->alive) return;
+    /* Only The Unicorn has a W in this arena (Spaghetti Vent). The Duck's
+       W (Government Clearance) needs objective structures that don't exist
+       here -- no-op for any other hero, not a crash or a silent wrong kit. */
+    if (h->hero_id != ARENA_HERO_UNICORN) return;
     h->w_active = !h->w_active;
 }
 
 void arena_cast_r(int owner) {
-    if (owner != 0) return;
+    if (owner < 0 || owner > 1) return;
     ArenaHero *h = &arena_state.heroes[owner];
+    ArenaHero *foe = &arena_state.heroes[owner == 0 ? 1 : 0];
     if (!h->alive || h->r_cooldown_ms > 0) return;
-    h->r_active_ms = ARENA_UNICORN_R_DURATION_MS;
-    h->r_cooldown_ms = ARENA_UNICORN_R_COOLDOWN_MS;
+
+    switch (h->hero_id) {
+    case ARENA_HERO_UNICORN:
+        h->r_active_ms = ARENA_UNICORN_R_DURATION_MS;
+        h->r_cooldown_ms = ARENA_UNICORN_R_COOLDOWN_MS;
+        break;
+    case ARENA_HERO_DUCK:
+        if (duck_pull_foe(h, foe, ARENA_DUCK_R_PULL_DIST, ARENA_DUCK_R_DAMAGE, ARENA_DUCK_R_RANGE)) {
+            h->r_cooldown_ms = ARENA_DUCK_R_COOLDOWN_MS;
+        }
+        break;
+    }
 }
 
-static void tick_unicorn_kit(ArenaHero *h, unsigned int dt_ms) {
-    if (h->owner != 0) return;
+static void tick_hero_kit(ArenaHero *h, unsigned int dt_ms) {
     if (h->q_cooldown_ms > 0) h->q_cooldown_ms -= (int)dt_ms;
     if (h->r_cooldown_ms > 0) h->r_cooldown_ms -= (int)dt_ms;
+    if (h->hero_id != ARENA_HERO_UNICORN) return; /* rest is Unicorn-only state */
     if (h->r_active_ms > 0) {
         h->r_active_ms -= (int)dt_ms;
         if (h->r_active_ms < 0) h->r_active_ms = 0;
@@ -247,6 +309,32 @@ static void tick_unicorn_kit(ArenaHero *h, unsigned int dt_ms) {
         float regen = ARENA_UNICORN_W_REGEN_PER_SEC * ((float)dt_ms / 1000.0f);
         h->hp += (int)regen;
         if (h->hp > h->max_hp) h->hp = h->max_hp;
+    }
+}
+
+/* bot_cast_kit_if_ready: simple heuristic AI for whichever hero the bot is
+ * playing -- cast Q (then R, once available) whenever off cooldown and the
+ * foe is within that ability's range. Not a real decision-making bot brain
+ * (that's Phase E's problem, GAME_AI_NORTHSTAR.md), just enough to prove
+ * the bot side can actually use a kit at all (Phase D's "both sides"). */
+static void bot_cast_kit_if_ready(ArenaHero *bot, ArenaHero *foe) {
+    if (!bot->alive || !foe->alive) return;
+    float dx = foe->x - bot->x, dz = foe->z - bot->z;
+    float dist = sqrtf(dx * dx + dz * dz);
+
+    switch (bot->hero_id) {
+    case ARENA_HERO_DUCK:
+        if (bot->q_cooldown_ms <= 0 && dist <= ARENA_DUCK_Q_RANGE) {
+            arena_cast_q(bot->owner);
+        } else if (bot->r_cooldown_ms <= 0 && dist <= ARENA_DUCK_R_RANGE) {
+            arena_cast_r(bot->owner);
+        }
+        break;
+    case ARENA_HERO_UNICORN:
+        if (bot->q_cooldown_ms <= 0 && dist <= ARENA_UNICORN_Q_HIT_RADIUS * 2.0f) {
+            arena_cast_q(bot->owner);
+        }
+        break;
     }
 }
 
@@ -275,7 +363,9 @@ void arena_update(unsigned int dt_ms) {
     update_hero_motion(&arena_state.heroes[0], dt_sec);
     update_hero_motion(&arena_state.heroes[1], dt_sec);
     resolve_combat(dt_ms);
-    tick_unicorn_kit(&arena_state.heroes[0], dt_ms);
+    tick_hero_kit(&arena_state.heroes[0], dt_ms);
+    tick_hero_kit(&arena_state.heroes[1], dt_ms);
+    bot_cast_kit_if_ready(&arena_state.heroes[1], &arena_state.heroes[0]);
 
     if (!arena_state.heroes[0].alive) arena_state.winner = 2;
     else if (!arena_state.heroes[1].alive) arena_state.winner = 1;
