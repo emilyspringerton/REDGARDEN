@@ -881,8 +881,8 @@ int main(int argc, char *argv[]) {
 
     int win_w = 1280, win_h = 720;
     SDL_Window *win = SDL_CreateWindow(
-        observing ? "RED GARDEN — OBSERVER MODE" :
-        (net_mode ? "RED GARDEN — MOBA (networked PvP)" : "RED GARDEN — MOBA (local)"),
+        observing ? "KNIGHTS OF THE VOID — OBSERVER MODE" :
+        (net_mode ? "KNIGHTS OF THE VOID (networked PvP)" : "KNIGHTS OF THE VOID (local)"),
         100, 100, win_w, win_h, SDL_WINDOW_OPENGL);
     if (!win) { fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError()); return 1; }
     SDL_GLContext ctx = SDL_GL_CreateContext(win);
