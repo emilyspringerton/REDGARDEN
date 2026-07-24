@@ -49,9 +49,27 @@ until a trigger condition fires, then unfolds for a short window.
   — then re-folds. Cannot be targeted, killed, or interacted with while folded.
 - **W — Load Bearing**: While unfolded, the Donkey can carry one ally's dropped item/resource
   drop for the rest of the fold cycle, delivering it to the owner on re-fold.
+- **Q — Paper Glide** (2026-07-24, founder direction: "launching itself into the air while folding
+  into a paper airplane... movement mobility and escape... fly over trees etc"): while unfolded,
+  launches itself into the air and refolds mid-launch into a paper-airplane shape, gliding a long
+  distance to carry the owner clear of immediate danger before landing and re-folding. Airborne for
+  the glide's duration — flies *over* terrain and ground-based obstacles rather than around them,
+  and is untargetable by ground-based crowd control for the same window (nothing can root or catch
+  what's currently in the air). Same Indirect-Control identity as the rest of the kit: this isn't a
+  player-cast ability with its own keybind, it's a second auto-trigger condition alongside the
+  Immortal's Fold passive — fires when the owner needs distance fast (a bad engage, a closing
+  gap-closer), not on command.
 - **Passive interaction**: stacks oddly with burst/execute effects aimed at the owner — an
   execute that would've killed the owner can be shielded out entirely if the Fold triggers first,
-  making the Donkey a strong answer to assassin dive comps.
+  making the Donkey a strong answer to assassin dive comps. Paper Glide compounds this further:
+  an owner who escapes airborne mid-engage denies an execute its window entirely, not just its
+  damage.
+- **Not built in code this pass**: The Donkey (and the rest of the Indirect-Control archetype) stays
+  blocked on a non-piloted-unit system that doesn't exist in `packages/simulation/arena_game.c` yet
+  — every hero currently implemented is directly owner-piloted. This is a real, flagged gap (see
+  NORTHSTAR §12's roster audit), not something this doc entry papers over; the ability is fully
+  specified here so implementation is a clean follow-on once that system exists, not a fresh design
+  question.
 
 ### The Duck ("A Duck, Reportedly Telekinetic", S, #103) — **Fighter/Assassin**
 

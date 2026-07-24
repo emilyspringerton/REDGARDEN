@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-07-24 (20)
+
+- docs(heroes): The Donkey — Paper Glide, a second auto-trigger ability (S170-49). Founder direction: "launching itself into the air while folding into a paper airplane... movement mobility and escape... fly over trees etc." Specified in `docs/HEROES_VS0.md` as Q, consistent with the existing Indirect-Control identity (auto-triggered alongside the Immortal's Fold passive, not player-cast): launches airborne, refolds into a paper-airplane shape mid-launch, glides clear of danger, ignoring ground terrain/obstacles and immune to ground-based CC while airborne. Docs only -- The Donkey (and the rest of the Indirect-Control archetype) stays blocked on a non-piloted-unit system that doesn't exist in `arena_game.c` yet, flagged explicitly in the entry rather than shoehorned into the owner-piloted sim.
+
 ## 2026-07-24 (19)
 
 - feat(arena): The Courier, Ratatoskr (S170-48) -- eleventh hero, roster 10 → 11. TYLER `multiverse_heroes.md` #32 is already nicknamed "The Courier"; his messenger-between-two-fixed-points framing (the eagle at Yggdrasil's crown, Nidhogg at its root) maps directly onto the two existing `ArenaNode` positions -- W (Between Eagle and Serpent) is a pure fixed-geography teleport to whichever node is farther away, distinct from every other hero's ally/foe-relative teleport. Q is a Unicorn-shaped dash-strike whose landed cast also cleanses The Courier's own active debuffs (the passive, "editing the message" back to him). R is a flat life-drain execute on the nearest enemy. 7 new headless tests (223 total). Pick-validation bound and draft modulo widened 10→11. Verified live after cleaning up a stray leftover-process port conflict: all 11 hero_ids drafted across a real 22-bot pool, left running on the current build.
