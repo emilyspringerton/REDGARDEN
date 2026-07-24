@@ -1029,3 +1029,32 @@ surface already existed from earlier this session: `okemily.com/tournaments.html
 leaderboard section, fetching the same public `/api/v1/redgarden/leaderboard` endpoint -- confirmed
 reachable from outside this box. Nothing new to build there; the founder can watch the named bots'
 records evolve at that URL as the persistent pool keeps playing.
+
+## 14. Draft-phase bans — decided against for now (2026-07-24, S170-56)
+
+Real design conversation, not a spec handed down whole. Worth keeping the reasoning, not just the
+conclusion, because the reasoning is what should govern this decision if it gets revisited later:
+
+Founder's starting ask was concrete — 3 bans per team, added to the existing draft phase. What
+followed was working through the actual order live: an attempted literal ban/pick sequence, a
+self-correction ("but in reverse"), an "or something" acknowledging the sequence itself wasn't the
+real question yet, a specific structural idea (last 2 bans land right before the last 4 picks —
+1 ban + 2 picks per team, back-loaded rather than front-loaded), a genuine open question about
+*starting* on a ban vs. a pick, and a real concern surfacing mid-thought: **starting the draft on
+a ban optimizes for a toxic community dynamic (banning what you personally dislike) over a
+meta-focused one (addressing what's actually strong).** That concern is the load-bearing part of
+this whole thread.
+
+"Use fibonacci to figure it out" followed as a heuristic suggestion for shaping the pick/ban
+cadence (an escalating or structured rhythm rather than strict alternation) -- floated, not
+committed to, before the thread resolved.
+
+**Resolution: skip bans entirely for now.** Founder's own close: "i really think actually skip
+bans all together for now it has a huge impact." Read plainly: bans are a high-leverage,
+hard-to-reverse social-dynamics lever (they shape whether a community forms around counter-play
+and meta-adaptation, or around punishing whatever's currently popular), and that's not a decision
+to bolt on as a minor draft-phase feature without first knowing which community dynamic the
+11-hero (soon 12) roster is actually cultivating. Nothing built. If bans get revisited later, the
+open questions above (order, back-loading, ban-vs-pick-first, the toxicity-vs-meta framing
+specifically) are the actual design surface to resolve -- not just "add 3 bans per team" as
+originally framed.
