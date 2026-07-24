@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-07-24 (22)
+
+- fix(ci): `.github/workflows/ci.yml` rebuilt to produce a distributable artifact (S170-54).
+  Founder, live: "the github artifact for REDGARDEN is unsuitable... no executable... SDL dll
+  not bundled... check shankpit for the protopattern." Root cause: CI only ran `build.sh` (RTS
+  server-side binaries) and never built `apps/arena` -- the actual product since today's MOBA
+  pivot -- and uploaded bare Linux ELFs with no runtime bundled either way, nothing a founder
+  could download and run. Mirrored `SHANKPIT/.github/workflows/release.yml`'s proven pattern:
+  cross-compile the arena client to Windows via `mingw-w64` + the official `SDL2-devel-2.30.10-
+  mingw` package, zip `RedGarden.exe` + `SDL2.dll` + a `PLAY.bat` as a separate Client artifact
+  from the Linux server-side binaries (Server artifact). No `-lglu32` needed, unlike SHANKPIT's
+  client -- `apps/arena` is shader-based and never depended on GLU. Also added `test_arena.sh` +
+  `test_10_bots.sh` as real CI gates before packaging -- neither was run in CI before this,
+  despite being the actual verification for everything built today. Linux side (tests, `build.sh`,
+  `build_arena.sh`) re-verified locally; the Windows cross-compile itself is CI-only-verified for
+  now (no `mingw-w64` installed locally, no sudo here -- queued as `sudo-queue/09-mingw-w64.sh`
+  for a local dry-run if wanted).
+
 ## 2026-07-24 (21)
 
 - feat(arena): territory capture redesigned to a real Arathi Basin-style channel + territorial jungle creeps + memorable bot names (S170-50/51). Replaced the S170-46 ambient-pressure territory model entirely with exclusive-presence channel capture: a node flips neutral the instant a channel starts (not on completion), interrupts (mixed presence, Pizza's corruption, damage taken, or the channeling team leaving) lose all progress with no free revert, and stealth (Frog's R) lets a lone capper channel undetected through a crowd of visible enemies -- but starting the channel breaks that stealth, and any damage to the channeling team interrupts it, both matching real Arathi Basin rules exactly. Added territorial jungle creeps: one per node, re-rolled from the node's current owner on every respawn, two flavors with genuinely different rewards (a rare contested-node creep grants a big capture-progress swing; a common owned-node creep heals its own team or helps the enemy flip the node, depending who kills it) -- a real counter-play tool against turtling comps. Activated real WOTAN stats tracking for the persistent bot pool (was silently running on self-minted tickets all session -- an env var oversight, not a code gap) and gave bots a curated pool of memorable display names via a new `--index` flag. 28 new headless tests (251 total). Verified live: a full ~2.5-minute 20-hero match ran to completion without crashing on the redesigned system; confirmed real, named player identities registering and the public leaderboard accumulating real stats.

@@ -13,16 +13,85 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install Linux dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libsdl2-dev libgl1-mesa-dev libglu1-mesa-dev
 
-      - name: Build
-        run: ./scripts/build.sh
+      - name: Headless tests (arena sim, replay, AI bridge, mat4)
+        run: |
+          bash scripts/test_arena.sh
+
+      - name: Networked bot-pool smoke test (VS0/VS1)
+        run: |
+          bash scripts/test_10_bots.sh
+
+      - name: Build Linux server-side binaries (server, arena_server, arena_bot, matchmaker, lobby, client bot)
+        run: |
+          bash scripts/build.sh
+
+      - name: Build Linux arena client (sanity check only -- the distributable client is Windows, below)
+        run: |
+          bash scripts/build_arena.sh
+
+      # Windows client cross-compile + SDL2 bundle, mirroring SHANKPIT's
+      # proven release.yml pattern (EMILY/BACKLOG.md S170-54 -- "the github
+      # artifact for REDGARDEN is unsuitable... no executable... SDL dll not
+      # bundled... check shankpit for the protopattern"). apps/arena is the
+      # product since the MOBA pivot (NORTHSTAR §13); a bare Linux ELF with
+      # no SDL2 runtime bundled isn't something a founder can just download
+      # and run. No -lglu32 here, unlike SHANKPIT's client -- apps/arena is
+      # a shader-based (modern GL) renderer that never needed GLU at all
+      # (see scripts/build_arena.sh's own comment).
+      - name: Install mingw-w64 + SDL2 mingw devel package
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y mingw-w64 zip
+          rm -rf sdl2_mingw SDL2-2.30.10 SDL2-devel-2.30.10-mingw.tar.gz || true
+          wget -q --retry-connrefused --tries=3 \
+            https://github.com/libsdl-org/SDL/releases/download/release-2.30.10/SDL2-devel-2.30.10-mingw.tar.gz
+          tar xzf SDL2-devel-2.30.10-mingw.tar.gz
+          mv SDL2-2.30.10/x86_64-w64-mingw32 ./sdl2_mingw
+
+      - name: Cross-compile Windows arena client
+        run: |
+          set -euo pipefail
+          x86_64-w64-mingw32-gcc -std=c99 -D_DEFAULT_SOURCE -O2 \
+            -o RedGarden.exe \
+            apps/arena/src/main.c \
+            packages/simulation/arena_game.c \
+            packages/simulation/arena_replay.c \
+            -I./sdl2_mingw/include \
+            -Ipackages \
+            -L./sdl2_mingw/lib \
+            -lmingw32 -lSDL2main -lSDL2 \
+            -lopengl32 -lws2_32 -lwinmm -lgdi32 -lm
+
+      - name: Bundle artifacts
+        run: |
+          set -euo pipefail
+          BUILD="build_${{ github.run_number }}_${GITHUB_SHA::7}"
+
+          mkdir -p RedGarden_Client
+          cp RedGarden.exe RedGarden_Client/
+          cp sdl2_mingw/bin/SDL2.dll RedGarden_Client/
+          printf '%s\n' "start RedGarden.exe --queue 127.0.0.1" > RedGarden_Client/PLAY.bat
+          zip -r "RedGarden_Client_${BUILD}.zip" RedGarden_Client
+
+          mkdir -p RedGarden_Server
+          cp build/red_garden_server RedGarden_Server/ 2>/dev/null || true
+          cp build/red_garden_arena_server RedGarden_Server/ 2>/dev/null || true
+          cp build/red_garden_arena_bot RedGarden_Server/ 2>/dev/null || true
+          cp build/red_garden_matchmaker RedGarden_Server/ 2>/dev/null || true
+          cp build/red_garden_lobby RedGarden_Server/ 2>/dev/null || true
+          printf '%s\n' "./red_garden_matchmaker --listen-port 7778 --lobby-size 20 --server-bin ./red_garden_arena_server --first-game-port 7300" > RedGarden_Server/START_ARENA_POOL.sh
+          chmod +x RedGarden_Server/START_ARENA_POOL.sh
+          zip -r "RedGarden_Server_${BUILD}.zip" RedGarden_Server
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: red-garden-build
-          path: build/
+          path: |
+            RedGarden_Client_*.zip
+            RedGarden_Server_*.zip
