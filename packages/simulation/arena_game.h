@@ -32,8 +32,9 @@ typedef enum {
     ARENA_HERO_FLAMEL = 7, /* merged with the former "Druid" archetype, 2026-07-24 -- see docs/HEROES_VS0.md */
     ARENA_HERO_MORRIGAN = 8,
     ARENA_HERO_DAGDA = 9,
+    ARENA_HERO_COURIER = 10, /* Ratatoskr, TYLER multiverse_heroes.md #32 */
 } ArenaHeroID;
-#define ARENA_HERO_COUNT 10
+#define ARENA_HERO_COUNT 11
 
 /* The Unicorn — first real hero kit wired in (S170-18). */
 #define ARENA_UNICORN_ARMOR         4    /* passive: Chassis Claim, flat dmg reduction */
@@ -255,6 +256,26 @@ typedef enum {
 #define ARENA_DAGDA_R_FLOOR_MS        3000    /* the porridge: a real damage floor */
 #define ARENA_DAGDA_R_HEAL            30      /* ...and still comes out ahead, not just surviving */
 #define ARENA_DAGDA_R_COOLDOWN_MS     26000
+
+/* The Courier — eleventh hero kit (S170-48, TYLER multiverse_heroes.md #32,
+ * "Ratatoskr's Debt-Collector"). Runs constantly between two fixed points
+ * (the eagle at Yggdrasil's crown, Nidhogg at its root) -- maps directly
+ * onto this arena's two existing ArenaNode positions rather than needing a
+ * new system. Passive cleanses The Courier's own debuffs on a landed Q hit
+ * ("editing the message" addressed back to him). Q is a dash-strike, same
+ * shape as Unicorn's Diagnostic Charge. W is a pure fixed-geography
+ * teleport (distinct from every other hero's ally/foe-relative teleports --
+ * this one always jumps to whichever node is farther away, "making
+ * progress along the tree"). R is a flat single-target life-drain execute
+ * ("started to involve judgment" -- taking a cut by force). */
+#define ARENA_COURIER_Q_DASH_DIST   5.0f
+#define ARENA_COURIER_Q_DAMAGE      10
+#define ARENA_COURIER_Q_HIT_RADIUS  1.8f
+#define ARENA_COURIER_Q_COOLDOWN_MS 4500
+#define ARENA_COURIER_W_COOLDOWN_MS 9000
+#define ARENA_COURIER_R_RANGE       6.0f
+#define ARENA_COURIER_R_DRAIN       18
+#define ARENA_COURIER_R_COOLDOWN_MS 20000
 
 typedef struct {
     float x, z;

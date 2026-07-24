@@ -907,3 +907,19 @@ unaccounted-for melee auto-attack landing in the same update tick, and separatel
 clamping at 0 making an exact post-damage value impossible for the near-dead case — fixed by
 comparing damage *deltas* across two isolated setups (matching the pattern already used for
 Doc Wheel's and Morrigan's own HP%-scaling tests) instead of asserting an absolute value.
+
+**S170-48: The Courier (Ratatoskr, TYLER #32) — eleventh hero, roster 10 → 11.** Founder: "add The
+Courier (ratatoskr)." TYLER's #32 entry is already nicknamed exactly "The Courier" — the messenger
+between the eagle at Yggdrasil's crown and Nidhogg at its root, who's "started editing" the
+messages after a long tenure. That two-fixed-endpoint framing maps directly onto this arena's two
+existing `ArenaNode` positions rather than needing a third system: The Courier's W (Between Eagle
+and Serpent) is a pure fixed-geography teleport — always jumps to whichever node is farther away,
+distinct from every other hero's ally/foe-relative teleports. Q (a dash-strike, same shape as
+Unicorn's Diagnostic Charge) doubles as the passive's trigger: a landed cast cleanses The Courier's
+own active debuffs ("editing the message" addressed back to him). R (The Debt Collector's Due) is a
+flat life-drain execute on the nearest enemy — "a job that was never meant to involve judgment, and
+has, over a very long tenure, started to." 7 new headless tests (223 total). Pick-validation bound
+and draft modulo widened once more (10 → 11). Verified live: relaunched the persistent bot pool
+(22 bots) after a stray-process port conflict from the previous session's leftover matchmaker was
+cleaned up (`pkill -9 -f red_garden`, then a clean relaunch) — all 11 hero_ids (0-10) drafted
+successfully, pool left running on the current build.

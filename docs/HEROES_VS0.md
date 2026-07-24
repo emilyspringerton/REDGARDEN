@@ -249,6 +249,26 @@ her here.
   the next day regardless — a real damage floor (HP cannot drop below 1 for the duration) plus a
   real heal on top, not just survival. Enduring **and** coming out ahead.
 
+### The Courier (TYLER `multiverse_heroes.md` #32, "Ratatoskr's Debt-Collector") — **Fighter/Assassin**
+
+Has carried insults up and down Yggdrasil, between the eagle at the crown and Nidhogg at the root,
+for centuries — and has started editing them along the way, a job that was never meant to involve
+judgment. That two-fixed-endpoint framing maps directly onto this arena's two existing `ArenaNode`
+positions rather than needing a new system: The Courier's whole kit is about running the line
+between two points and taking a cut off whatever passes through.
+
+- **Passive — Lightly Edited**: whenever The Courier's Q lands a hit, it cleanses any active debuff
+  on him (silence, root) — he edits the message addressed back to him out of the delivery.
+- **Q — The Insult, Lightly Edited**: dashes toward the nearest enemy (same shape as Unicorn's
+  Diagnostic Charge) and deals damage on arrival — the insult delivered in person.
+- **W — Between Eagle and Serpent**: instantly repositions to whichever of the two map nodes is
+  farther from his current position — always making real progress along the tree, a pure mobility
+  tool distinct from every other hero's teleport (which are all ally- or foe-relative; this one is
+  fixed-geography).
+- **R — The Debt Collector's Due**: a long-tenured job has, over time, started to involve judgment
+  it was never meant to — seizes a flat amount of HP from the nearest enemy and delivers it to
+  himself, a forced collection rather than a fair trade.
+
 ---
 
 ## Starting Item Roster (VS0)

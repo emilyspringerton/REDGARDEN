@@ -1292,6 +1292,99 @@ static void test_dagda_r_floor_and_heal(void) {
           "the damage floor holds Dagda at 1 HP against repeated attacks that would otherwise be lethal");
 }
 
+/* S170-48: The Courier (Ratatoskr, TYLER #32). */
+
+static void test_courier_q_dashes_and_damages(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_COURIER;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hero_id = ARENA_HERO_DUCK; /* no armor */
+    arena_state.heroes[ARENA_TEAM_SIZE].x = ARENA_COURIER_Q_DASH_DIST; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 100;
+
+    arena_cast_q(0);
+
+    CHECK(arena_state.heroes[0].x > 0.0f, "The Insult, Lightly Edited dashes The Courier toward the enemy");
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].hp == 100 - ARENA_COURIER_Q_DAMAGE,
+          "the dash damages the enemy on arrival");
+}
+
+static void test_courier_q_cleanses_self_debuffs(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_COURIER;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[0].rooted_ms = 500;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = 3.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 100;
+
+    /* silenced_ms > 0 would block the cast entirely (per arena_cast_q's own
+       gate), so only rooted_ms is exercised here -- the cleanse still runs
+       on a landed cast regardless. */
+    arena_cast_q(0);
+
+    CHECK(arena_state.heroes[0].rooted_ms == 0,
+          "Lightly Edited cleanses The Courier's own active root on a landed cast");
+}
+
+static void test_courier_w_teleports_to_farther_node(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_COURIER;
+    /* Stand exactly on node 0 -- node 1 is now strictly farther. */
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+
+    arena_toggle_w(0);
+
+    CHECK(arena_state.heroes[0].x == arena_state.nodes[1].x && arena_state.heroes[0].z == arena_state.nodes[1].z,
+          "Between Eagle and Serpent teleports to whichever node is farther away");
+}
+
+static void test_courier_r_drains_life_from_nearest_enemy(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_COURIER;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[0].max_hp = 100; arena_state.heroes[0].hp = 50;
+    arena_state.heroes[ARENA_TEAM_SIZE].hero_id = ARENA_HERO_DUCK;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = ARENA_COURIER_R_RANGE - 1.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 100;
+
+    arena_cast_r(0);
+
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].hp == 100 - ARENA_COURIER_R_DRAIN,
+          "The Debt Collector's Due drains HP from the nearest enemy");
+    CHECK(arena_state.heroes[0].hp == 50 + ARENA_COURIER_R_DRAIN,
+          "...and delivers it to The Courier");
+}
+
+static void test_courier_r_out_of_range_whiffs(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_COURIER;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = ARENA_COURIER_R_RANGE * 3.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+
+    arena_cast_r(0);
+
+    CHECK(arena_state.heroes[0].r_cooldown_ms == 0,
+          "The Debt Collector's Due whiffs out of range -- cooldown is not consumed");
+}
+
 int main(void) {
     printf("RED GARDEN arena_game headless smoke test\n\n");
     test_movement_reaches_target();
@@ -1370,6 +1463,11 @@ int main(void) {
     test_dagda_q_revives_when_only_hurt_ally_in_range();
     test_dagda_w_heals_allies_and_cc_enemies_at_once();
     test_dagda_r_floor_and_heal();
+    test_courier_q_dashes_and_damages();
+    test_courier_q_cleanses_self_debuffs();
+    test_courier_w_teleports_to_farther_node();
+    test_courier_r_drains_life_from_nearest_enemy();
+    test_courier_r_out_of_range_whiffs();
     printf("\n%s\n", failures == 0 ? "ALL PASS" : "SOME FAILED");
     return failures == 0 ? 0 : 1;
 }

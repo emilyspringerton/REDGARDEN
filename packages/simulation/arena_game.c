@@ -660,6 +660,70 @@ static void dagda_cast_w(ArenaHero *dagda, int owner) {
     }
 }
 
+/* courier_cast_q: The Insult, Lightly Edited -- dashes a fixed distance
+ * toward the nearest enemy (same shape as Unicorn's Diagnostic Charge:
+ * fixed dash length, not clamped to the foe's own distance, so it can
+ * overshoot past a close target same as Unicorn's does) and deals damage
+ * if it lands within hit radius. Also cleanses The Courier's own active
+ * debuffs on cast (Lightly Edited passive) -- "editing the message"
+ * addressed back to him, regardless of whether the damage half connects.
+ * Returns 1 if there was a living enemy to dash toward at all, 0 if not. */
+static int courier_cast_q(ArenaHero *courier, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return 0;
+    float dx = foe->x - courier->x, dz = foe->z - courier->z;
+    float len = sqrtf(dx * dx + dz * dz);
+    if (len > 0.01f) {
+        float nx = courier->x + dx / len * ARENA_COURIER_Q_DASH_DIST;
+        float nz = courier->z + dz / len * ARENA_COURIER_Q_DASH_DIST;
+        if (nx < -ARENA_HALF_EXTENT) nx = -ARENA_HALF_EXTENT;
+        if (nx > ARENA_HALF_EXTENT) nx = ARENA_HALF_EXTENT;
+        if (nz < -ARENA_HALF_EXTENT) nz = -ARENA_HALF_EXTENT;
+        if (nz > ARENA_HALF_EXTENT) nz = ARENA_HALF_EXTENT;
+        courier->x = nx;
+        courier->z = nz;
+        courier->moving = 0;
+    }
+    float fdx = foe->x - courier->x, fdz = foe->z - courier->z;
+    if (sqrtf(fdx * fdx + fdz * fdz) <= ARENA_COURIER_Q_HIT_RADIUS) {
+        apply_damage(foe, apply_armor(ARENA_COURIER_Q_DAMAGE, arena_hero_armor(foe)));
+    }
+    courier->silenced_ms = 0;
+    courier->rooted_ms = 0;
+    return 1;
+}
+
+/* courier_toggle_w: Between Eagle and Serpent -- instantly repositions to
+ * whichever of the two map nodes is farther from The Courier's current
+ * position, always making real progress "along the tree" rather than
+ * bouncing back and forth to the same one. Pure fixed-geography teleport,
+ * distinct from every other hero's ally/foe-relative one. Always lands
+ * (there are always exactly two nodes) -- no whiff case. */
+static void courier_toggle_w(ArenaHero *courier) {
+    float d0x = arena_state.nodes[0].x - courier->x, d0z = arena_state.nodes[0].z - courier->z;
+    float d1x = arena_state.nodes[1].x - courier->x, d1z = arena_state.nodes[1].z - courier->z;
+    float dist0 = sqrtf(d0x * d0x + d0z * d0z);
+    float dist1 = sqrtf(d1x * d1x + d1z * d1z);
+    int target = (dist1 > dist0) ? 1 : 0;
+    courier->x = arena_state.nodes[target].x;
+    courier->z = arena_state.nodes[target].z;
+    courier->moving = 0;
+}
+
+/* courier_cast_r: The Debt Collector's Due -- a flat life-drain execute on
+ * the nearest enemy in range. "A job that was never meant to involve
+ * judgment, and has, over a very long tenure, started to" -- The Courier
+ * takes a cut off what passes through him by force. Returns 1 if it
+ * landed, 0 on a whiff. */
+static int courier_cast_r(ArenaHero *courier, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return 0;
+    float dx = foe->x - courier->x, dz = foe->z - courier->z;
+    if (sqrtf(dx * dx + dz * dz) > ARENA_COURIER_R_RANGE) return 0;
+    apply_damage(foe, apply_armor(ARENA_COURIER_R_DRAIN, arena_hero_armor(foe)));
+    courier->hp += ARENA_COURIER_R_DRAIN;
+    if (courier->hp > courier->max_hp) courier->hp = courier->max_hp;
+    return 1;
+}
+
 void arena_cast_q(int owner) {
     if (owner < 0 || owner >= ARENA_MAX_HEROES) return;
     ArenaHero *h = &arena_state.heroes[owner];
@@ -719,6 +783,11 @@ void arena_cast_q(int owner) {
     case ARENA_HERO_DAGDA:
         if (dagda_cast_q(h, foe, arena_nearest_ally(owner))) {
             h->q_cooldown_ms = cast_cooldown(h, ARENA_DAGDA_Q_COOLDOWN_MS);
+        }
+        break;
+    case ARENA_HERO_COURIER:
+        if (courier_cast_q(h, foe)) {
+            h->q_cooldown_ms = cast_cooldown(h, ARENA_COURIER_Q_COOLDOWN_MS);
         }
         break;
     }
@@ -792,6 +861,13 @@ void arena_toggle_w(int owner) {
         if (h->w_cooldown_ms > 0) return;
         dagda_cast_w(h, owner);
         h->w_cooldown_ms = cast_cooldown(h, ARENA_DAGDA_W_COOLDOWN_MS);
+        break;
+    case ARENA_HERO_COURIER:
+        /* Between Eagle and Serpent: always lands, there are always
+           exactly two nodes to jump between. */
+        if (h->w_cooldown_ms > 0) return;
+        courier_toggle_w(h);
+        h->w_cooldown_ms = cast_cooldown(h, ARENA_COURIER_W_COOLDOWN_MS);
         break;
     default:
         /* No-op for any hero without a real W in this arena, not a crash
@@ -920,6 +996,11 @@ void arena_cast_r(int owner) {
         h->hp += ARENA_DAGDA_R_HEAL;
         if (h->hp > h->max_hp) h->hp = h->max_hp;
         h->r_cooldown_ms = cast_cooldown(h, ARENA_DAGDA_R_COOLDOWN_MS);
+        break;
+    case ARENA_HERO_COURIER:
+        if (courier_cast_r(h, foe)) {
+            h->r_cooldown_ms = cast_cooldown(h, ARENA_COURIER_R_COOLDOWN_MS);
+        }
         break;
     }
 }
@@ -1197,6 +1278,13 @@ static void bot_cast_kit_if_ready(ArenaHero *bot, ArenaHero *foe) {
         if (bot->q_cooldown_ms <= 0 && dist <= ARENA_DAGDA_Q_RANGE) {
             arena_cast_q(bot->owner);
         } else if (bot->hp < bot->max_hp / 3 && bot->r_cooldown_ms <= 0) {
+            arena_cast_r(bot->owner);
+        }
+        break;
+    case ARENA_HERO_COURIER:
+        if (bot->q_cooldown_ms <= 0) {
+            arena_cast_q(bot->owner); /* dash-strike, closes distance on its own like Morrigan's W */
+        } else if (bot->r_cooldown_ms <= 0 && dist <= ARENA_COURIER_R_RANGE) {
             arena_cast_r(bot->owner);
         }
         break;
