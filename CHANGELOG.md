@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-07-24 (33)
+
+- fix(ci): hard timeout ceilings after a real hung build. Founder: "we have a hung build for the
+  rebrand in ci." Confirmed via the GitHub Actions API: commit `62ca556`'s run sat "in_progress"
+  on the mingw-w64/SDL2 install step for 18+ minutes with byte-identical YAML to four immediately
+  preceding runs that all passed in seconds -- a transient runner/mirror stall, not a code bug, but
+  nothing in the workflow would have ever timed it out on its own (job default is 6 hours; no gh
+  CLI/token available in this environment to cancel it remotely). Added `timeout-minutes: 30` at
+  the job level, `timeout-minutes: 10` on the specific mingw/SDL2 step, `DEBIAN_FRONTEND=noninteractive`
+  on that step's apt-get (defends against an interactive alternatives prompt as one plausible
+  cause), and a real `wget --timeout=30` (previously only `--retry-connrefused`, which doesn't
+  catch a connection that succeeds and then stalls).
+
 ## 2026-07-24 (32)
 
 - feat(arena): 12th hero, Loki (S170-79). Founder: "add LOKI to KNIGHTS_OF_THE_VOID hero

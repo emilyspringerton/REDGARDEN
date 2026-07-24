@@ -9,6 +9,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Default job ceiling is 6 hours -- 2026-07-24's hang on the mingw/SDL2 step would have sat
+    # "in_progress" that whole time with nobody able to cancel it (no gh CLI/token in this repo's
+    # usual working environment). The full pipeline normally finishes in a few minutes.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,12 +47,22 @@ jobs:
       # and run. No -lglu32 here, unlike SHANKPIT's client -- apps/arena is
       # a shader-based (modern GL) renderer that never needed GLU at all
       # (see scripts/build_arena.sh's own comment).
+      # timeout-minutes here is a hard safety net: this step normally finishes in well under a
+      # minute, but 2026-07-24 saw a run hang indefinitely on it (stuck ~18+ min with no error,
+      # no completion, no gh CLI/token available to cancel it remotely) with byte-identical YAML
+      # to four immediately-prior runs that all passed in seconds -- a transient runner/mirror
+      # stall, not a real bug, but nothing here would have ever timed out it out on its own:
+      # apt-get install has no DEBIAN_FRONTEND guard against an interactive prompt, and wget only
+      # retries on connection-refused, not a connection that succeeds and then just stalls.
       - name: Install mingw-w64 + SDL2 mingw devel package
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
           set -euo pipefail
           sudo apt-get install -y mingw-w64 zip
           rm -rf sdl2_mingw SDL2-2.30.10 SDL2-devel-2.30.10-mingw.tar.gz || true
-          wget -q --retry-connrefused --tries=3 \
+          wget -q --timeout=30 --tries=3 --retry-connrefused \
             https://github.com/libsdl-org/SDL/releases/download/release-2.30.10/SDL2-devel-2.30.10-mingw.tar.gz
           tar xzf SDL2-devel-2.30.10-mingw.tar.gz
           mv SDL2-2.30.10/x86_64-w64-mingw32 ./sdl2_mingw
