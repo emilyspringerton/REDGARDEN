@@ -1,6 +1,15 @@
 # Changelog
 
-## 2026-07-24
+## 2026-07-24 (2)
+
+- NORTHSTAR §12 Phase B (replay logging, S170-28) started for the RTS half: `apps/server` now
+  opens `var/matches/<port>-<timestamp>.jsonl` per match and appends `match_start`/`connect`
+  (with Phase A's `player_id`)/`card_play`/`match_end` events — exactly §10's originally-spec'd
+  minimum hook, now with player identity attached. Verified real log output from
+  `scripts/test_10_bots.sh`. `var/` added to `.gitignore`. The MOBA half (`apps/arena`'s per-tick
+  hero-state logging) is not started -- distinct next step, not covered by this pass.
+
+## 2026-07-24 (1)
 
 - NORTHSTAR §12 Phase A (WOTAN player identity, S170-26) started: `apps/server` now captures the
   real IDUNA-minted `player_id` from every connect ticket instead of discarding it after

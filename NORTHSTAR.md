@@ -369,10 +369,23 @@ table. Reporting REDGARDEN results into IDUNA needs either a genre-agnostic sche
 (`wins`/`losses`/`matches_played` columns) or a separate endpoint. That's a real IDUNA schema
 decision, flagged here rather than guessed past — see `EMILY/BACKLOG.md` S170-26.
 
-**Phase B — Replay logging.** Extends §10's already-specified minimum hook (`red_garden_server`
-per-match `var/matches/<port>-<timestamp>.jsonl` event log) to `apps/arena`'s MOBA mode too —
-per-tick hero position/HP/ability-cast snapshots, keyed to the WOTAN player identity from Phase A
-so a replay says *whose* match it is, not just *a* match.
+**Phase B — Replay logging. Started 2026-07-24 (S170-28).** Extends §10's already-specified
+minimum hook (`red_garden_server` per-match `var/matches/<port>-<timestamp>.jsonl` event log) to
+`apps/arena`'s MOBA mode too — per-tick hero position/HP/ability-cast snapshots, keyed to the
+WOTAN player identity from Phase A so a replay says *whose* match it is, not just *a* match.
+
+**Done so far — the RTS half (`apps/server`), exactly as §10 originally spec'd, now with player
+identity attached.** Each server instance opens `var/matches/<port>-<timestamp>.jsonl` at startup
+and appends one JSON line per `match_start`, `connect` (now including the Phase A `player_id`,
+hex-encoded, or `"unregistered"` for a ticket without one), `card_play` (client, player_id, card,
+grid position), and `match_end` (winner) — verified against real match logs from
+`scripts/test_10_bots.sh`, not just read from the code. `var/` added to `.gitignore` (generated
+data, not source).
+
+**Not done yet — the MOBA half (`apps/arena`).** `apps/arena` is a separate binary with its own
+per-tick hero-state loop (position/HP/ability cooldowns, see `packages/simulation/arena_game.c`);
+extending the same event-log pattern there is a distinct, not-yet-started piece of this phase, not
+covered by this pass.
 
 **Phase C — Observer mode, first-class.** Founder: "observer mode is a first class citizen." Not
 a bolted-on debug view — a real client mode that reads Phase B's logs (live-tailing an in-progress

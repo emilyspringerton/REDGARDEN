@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -144,6 +146,68 @@ static void load_ticket_secret(void) {
     printf("REDGARDEN_TICKET_SECRET loaded (%d bytes)\n", ticket_secret_len);
 }
 
+static unsigned int get_server_time(void);
+
+// Match event log (NORTHSTAR §10's minimum hook + §12 Phase B, EMILY/
+// BACKLOG.md S170-28). Deliberately just a data-capture hook, not a replay
+// system: no player-facing playback, no spectator wire protocol. One
+// newline-delimited JSON event per line, appended to
+// var/matches/<port>-<timestamp>.jsonl for this match's server process.
+// Player_id fields are hex-encoded from the Phase A ticket capture so a
+// replay/training pass can attribute events to a real WOTAN player, not
+// just a slot index -- the whole reason Phase A had to land first.
+static FILE *match_log_fp = NULL;
+
+static void player_id_hex(int client_id, char out[33]) {
+    if (!client_has_player_id[client_id]) {
+        strcpy(out, "unregistered");
+        return;
+    }
+    for (int i = 0; i < 16; i++) {
+        snprintf(out + i * 2, 3, "%02x", client_player_id[client_id][i]);
+    }
+}
+
+static void match_log_open(int port) {
+    mkdir("var", 0755);
+    mkdir("var/matches", 0755);
+    char path[256];
+    snprintf(path, sizeof(path), "var/matches/%d-%ld.jsonl", port, (long)time(NULL));
+    match_log_fp = fopen(path, "a");
+    if (!match_log_fp) {
+        printf("WARNING: could not open match log %s -- match will not be logged (S170-28)\n", path);
+        return;
+    }
+    fprintf(match_log_fp, "{\"event\":\"match_start\",\"port\":%d,\"ts_ms\":%u}\n", port, get_server_time());
+    fflush(match_log_fp);
+    printf("Match event log: %s\n", path);
+}
+
+static void match_log_connect(int client_id) {
+    if (!match_log_fp) return;
+    char pid_hex[33];
+    player_id_hex(client_id, pid_hex);
+    fprintf(match_log_fp, "{\"event\":\"connect\",\"client_id\":%d,\"player_id\":\"%s\",\"ts_ms\":%u}\n",
+            client_id, pid_hex, get_server_time());
+    fflush(match_log_fp);
+}
+
+static void match_log_card_play(int client_id, uint8_t card_id, int16_t grid_x, int16_t grid_z) {
+    if (!match_log_fp) return;
+    char pid_hex[33];
+    player_id_hex(client_id, pid_hex);
+    fprintf(match_log_fp,
+            "{\"event\":\"card_play\",\"client_id\":%d,\"player_id\":\"%s\",\"card_id\":%d,\"grid_x\":%d,\"grid_z\":%d,\"ts_ms\":%u}\n",
+            client_id, pid_hex, (int)card_id, (int)grid_x, (int)grid_z, get_server_time());
+    fflush(match_log_fp);
+}
+
+static void match_log_win(int winner) {
+    if (!match_log_fp) return;
+    fprintf(match_log_fp, "{\"event\":\"match_end\",\"winner\":%d,\"ts_ms\":%u}\n", winner, get_server_time());
+    fflush(match_log_fp);
+}
+
 static unsigned int get_server_time(void) {
 #ifdef _WIN32
     return (unsigned int)GetTickCount();
@@ -216,6 +280,7 @@ static void server_handle_packet(struct sockaddr_in *sender, char *buffer, int s
                 h.timestamp = get_server_time();
                 sendto(sock, (char *)&h, sizeof(NetHeader), 0, (struct sockaddr *)sender, sizeof(struct sockaddr_in));
                 printf("CLIENT %d CONNECTED\n", client_id);
+                match_log_connect(client_id);
                 break;
             }
         }
@@ -227,6 +292,7 @@ static void server_handle_packet(struct sockaddr_in *sender, char *buffer, int s
         if (cmd->sequence <= client_last_seq[client_id]) return;
         client_last_seq[client_id] = cmd->sequence;
         local_apply_card((uint8_t)client_id, cmd->card_id, cmd->grid_x, cmd->grid_z);
+        match_log_card_play(client_id, cmd->card_id, cmd->grid_x, cmd->grid_z);
     }
 }
 
@@ -278,8 +344,10 @@ int main(int argc, char *argv[]) {
     load_ticket_secret();
     load_iduna_agent_config();
     server_net_init(port);
+    match_log_open(port);
     local_init_match(2);
     int running = 1;
+    int last_winner_logged = 0;
     while (running) {
         char buffer[1024];
         struct sockaddr_in sender;
@@ -290,6 +358,10 @@ int main(int argc, char *argv[]) {
             len = recvfrom(sock, buffer, 1024, 0, (struct sockaddr *)&sender, &slen);
         }
         local_update(16);
+        if (local_state.match_winner != 0 && !last_winner_logged) {
+            match_log_win(local_state.match_winner);
+            last_winner_logged = 1;
+        }
         server_broadcast();
         #ifdef _WIN32
         Sleep(16);
