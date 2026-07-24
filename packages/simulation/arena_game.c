@@ -3,6 +3,7 @@
 #include <string.h>
 
 ArenaState arena_state;
+int arena_bot_enabled = 1;
 
 /* ---- Tiny hand-authored feed-forward "brain" for the bot hero ----
  * Same shape as SHANKPIT's bot brain (packages/simulation/neural_net.h,
@@ -503,7 +504,7 @@ void arena_update(unsigned int dt_ms) {
     if (arena_state.winner != 0) return;
     float dt_sec = (float)dt_ms / 1000.0f;
 
-    arena_bot_tick(dt_ms);
+    if (arena_bot_enabled) arena_bot_tick(dt_ms);
 
     /* If the player's hero is close enough to the bot, treat the last
        move-target as an attack-move: keep closing until in range. */
@@ -526,7 +527,15 @@ void arena_update(unsigned int dt_ms) {
     resolve_combat(dt_ms);
     tick_hero_kit(&arena_state.heroes[0], &arena_state.heroes[1], dt_ms);
     tick_hero_kit(&arena_state.heroes[1], &arena_state.heroes[0], dt_ms);
-    bot_cast_kit_if_ready(&arena_state.heroes[1], &arena_state.heroes[0]);
+    /* Gated the same as arena_bot_tick (movement) above -- without this, a
+       real second player (owner 1) would still get their kit cast
+       autonomously by the internal bot AI (including Duck's Q, which pulls
+       the foe), fighting their own real cast commands. Found live, 2026-07-24:
+       hero0 (owner 0, no move command ever sent) still moved and took
+       damage in a server with zero connected clients, because this call
+       wasn't gated -- Duck's Q was yanking it every time it came off
+       cooldown. */
+    if (arena_bot_enabled) bot_cast_kit_if_ready(&arena_state.heroes[1], &arena_state.heroes[0]);
 
     if (!arena_state.heroes[0].alive) arena_state.winner = 2;
     else if (!arena_state.heroes[1].alive) arena_state.winner = 1;

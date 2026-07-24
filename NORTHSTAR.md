@@ -608,3 +608,41 @@ hero instead of only ever facing (or being) a bot brain. **Explicitly deferred u
 human-playable networked PvP is proven fun:** 10v10, N-player lobbies, persistent bot fleets, team
 assignment. Scaling team size before the core loop is confirmed fun was the mistake in the
 canceled plan; not repeating it here.
+
+**Done — real 1v1 networked PvP, same day.** New `apps/arena_server` (server-authoritative UDP,
+2 hero slots, ports the proven connect-ticket/WOTAN pieces from `apps/server` rather than
+re-deriving them) and a `--connect <host>` mode added to the existing `apps/arena` client (network
+handshake happens before SDL/window creation, so it's fully testable on a headless box up to that
+point). New wire packets in `protocol.h` (`PACKET_ARENA_MOVE/CAST/SNAPSHOT`). The existing
+matchmaker is untouched — this is a direct-connect first step, matchmaking for the MOBA is a
+later slice.
+
+Verified live, twice, catching two real bugs along the way rather than assuming the first pass
+was correct:
+
+1. **Kit-cast bug.** `arena_bot_enabled` (added to stop the internal bot from *moving* owner 1 once
+   a real second player connects) didn't also gate `bot_cast_kit_if_ready` — a real second player's
+   hero was still getting autonomously yanked and attacked by the bot's kit AI (Duck's Q pulls the
+   foe), found by testing against a real server, not by review. Fixed by gating both calls the
+   same way; a regression test (`test_arena_bot_enabled_gates_kit_casts_too`) now covers it
+   headless.
+2. **Sim-clock-starts-too-early bug.** With only one real client connected, the default
+   `arena_bot_enabled=1` (correct for local solo-vs-bot play) meant the bot immediately started
+   fighting an empty second slot, and the match could fully resolve before a second real player
+   ever got the chance to join. Fixed at the server level: `arena_update()` only runs once both
+   real slots are filled (`client_active[0] && client_active[1]`) — before that, the match idles,
+   broadcasting a static "waiting" snapshot.
+
+Final verified state: two real clients, each with a distinct real WOTAN identity, connect to
+`apps/arena_server`; the match correctly waits with both heroes stationary until both are present;
+once both connect, the internal bot is fully disabled (movement and kit-casts alike) and both
+heroes sit at full HP with no unprompted movement or combat — genuine PvP, waiting on real input
+from both sides, not two bots fighting each other. `scripts/test_arena.sh` and
+`scripts/test_10_bots.sh` both re-verified clean.
+
+**Still not done, on purpose:** the client's rendering/input loop for a live network match hasn't
+been visually verified on this box (no Xvfb, same standing constraint as the local demo). Match
+results reporting to WOTAN reuses `report_match_result`'s exact shape but posts under
+`"game":"redgarden-arena"` rather than `"redgarden"`, correctly keeping card-RTS and MOBA stats
+separate on the same genre-agnostic `player_game_stats` table. Matchmaking (vs. direct `--connect`)
+for the MOBA, 10v10, and everything else in §13's original deferred list stays deferred.

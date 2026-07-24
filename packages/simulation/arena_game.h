@@ -129,6 +129,14 @@ typedef struct {
 
 extern ArenaState arena_state;
 
+/* When nonzero (the default), arena_update() drives owner 1 via the
+ * internal hand-authored bot brain (arena_bot_tick) every tick -- correct
+ * for local single-player-vs-bot play (apps/arena's existing local mode).
+ * apps/arena_server (2026-07-24 pivot, NORTHSTAR §13) sets this to 0 once a
+ * real second client connects, so a real remote player's own move/cast
+ * commands aren't immediately overwritten by the bot AI each tick. */
+extern int arena_bot_enabled;
+
 /* arena_init defaults to player=Unicorn, bot=Duck (S170-31) -- both slots
  * carry a real kit now, proving Phase D's "both sides" requirement, not
  * just a second player-selectable option. arena_init_with_heroes lets a

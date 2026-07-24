@@ -28,3 +28,11 @@ gcc "${COMMON_FLAGS[@]}" \
 gcc "${COMMON_FLAGS[@]}" \
   -o "${BUILD_DIR}/red_garden_matchmaker" \
   "${ROOT_DIR}/apps/matchmaker/src/main.c"
+
+# NORTHSTAR §13 (2026-07-24 pivot): apps/arena is the product now -- this is
+# its server-authoritative UDP counterpart (1v1 real networked PvP).
+gcc "${COMMON_FLAGS[@]}" \
+  -o "${BUILD_DIR}/red_garden_arena_server" \
+  "${ROOT_DIR}/apps/arena_server/src/main.c" \
+  "${ROOT_DIR}/packages/simulation/arena_game.c" \
+  -lm

@@ -420,6 +420,36 @@ static void test_frog_has_no_w(void) {
           "toggling W for The Frog is a no-op -- Borrowed Time is ally-targeted, no ally in 1v1");
 }
 
+/* Regression test, found live 2026-07-24 (NORTHSTAR §13, the MOBA-is-the-
+ * product pivot): arena_bot_enabled was added to stop the internal bot from
+ * *moving* owner 1 once a real second player connects (apps/arena_server),
+ * but bot_cast_kit_if_ready (ability casts -- including Duck's Q, which
+ * pulls the foe) was still being called unconditionally. A real second
+ * player's hero would still get yanked around and attacked by the "disabled"
+ * bot. Confirmed live against a real arena_server with zero clients
+ * connected: owner 0 moved and took damage despite never sending a move
+ * command, because Duck's Q kept firing. Fixed by gating the kit-cast call
+ * the same way as the movement call. */
+static void test_arena_bot_enabled_gates_kit_casts_too(void) {
+    arena_init_with_heroes(ARENA_HERO_UNICORN, ARENA_HERO_DUCK);
+    arena_bot_enabled = 0;
+    /* Put the Duck (owner 1) in range of the Unicorn (owner 0) with its Q
+       off cooldown -- if kit-casting weren't gated, this alone would pull
+       and damage owner 0 within a handful of ticks. */
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].x = 3.0f; arena_state.heroes[1].z = 0.0f;
+    int start_hp = arena_state.heroes[0].hp;
+    float start_x = arena_state.heroes[0].x;
+
+    for (int i = 0; i < 200; i++) arena_update(16); /* 3.2s of sim time */
+
+    CHECK(arena_state.heroes[0].hp == start_hp,
+          "with arena_bot_enabled=0, the bot's kit-cast AI never damages owner 0 (no real input sent)");
+    CHECK(arena_state.heroes[0].x == start_x,
+          "with arena_bot_enabled=0, owner 0 is never pulled/moved by the bot's kit AI either");
+    arena_bot_enabled = 1; /* restore the default for any test run after this one */
+}
+
 int main(void) {
     printf("RED GARDEN arena_game headless smoke test\n\n");
     test_movement_reaches_target();
@@ -449,6 +479,7 @@ int main(void) {
     test_frog_q_uses_oldest_available_history_before_3s_elapsed();
     test_frog_r_vanishes();
     test_frog_has_no_w();
+    test_arena_bot_enabled_gates_kit_casts_too();
     printf("\n%s\n", failures == 0 ? "ALL PASS" : "SOME FAILED");
     return failures == 0 ? 0 : 1;
 }

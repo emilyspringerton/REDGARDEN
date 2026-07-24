@@ -12,14 +12,269 @@
 #include <SDL2/SDL_opengl_glext.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#ifndef _WIN32
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
+#endif
+
 #include "../../../packages/common/mat4.h"
+#include "../../../packages/common/protocol.h"
+#include "../../../packages/common/hmac_sha256.h"
+#include "../../../packages/common/http_client.h"
 #include "../../../packages/simulation/arena_game.h"
 #include "../../../packages/simulation/arena_replay.h"
+
+/* ---------------- networked PvP (2026-07-24 pivot, NORTHSTAR §13) ----------------
+ * Local-only mode (no --connect flag) is unchanged: my_owner stays 0,
+ * arena_update() runs fully client-side against the built-in bot. In
+ * network mode, apps/arena_server is authoritative -- this client only
+ * sends move/cast commands and applies incoming snapshots, never calls
+ * arena_update() itself. */
+static int net_mode = 0;
+static int my_owner = 0; /* which arena_state.heroes[] slot is "me" -- 0 in local mode always */
+
+#ifndef _WIN32
+#define ARENA_TICKET_PAYLOAD_LEN 20
+#define ARENA_TICKET_TOTAL_LEN (ARENA_TICKET_PAYLOAD_LEN + 16)
+
+static int net_sock = -1;
+static struct sockaddr_in net_server_addr;
+
+static char iduna_host[128] = "127.0.0.1";
+static int iduna_port = 8080;
+static char iduna_agent_name[128] = "";
+static char iduna_agent_secret[256] = "";
+static int iduna_agent_configured = 0;
+
+static void load_iduna_agent_config(void) {
+    const char *base_url = getenv("IDUNA_BASE_URL");
+    if (base_url && base_url[0]) {
+        const char *host_start = base_url;
+        if (strncmp(host_start, "http://", 7) == 0) host_start += 7;
+        else if (strncmp(host_start, "https://", 8) == 0) host_start += 8;
+        char host_buf[128];
+        strncpy(host_buf, host_start, sizeof(host_buf) - 1);
+        host_buf[sizeof(host_buf) - 1] = '\0';
+        char *slash = strchr(host_buf, '/');
+        if (slash) *slash = '\0';
+        char *colon = strchr(host_buf, ':');
+        int port = iduna_port;
+        if (colon) { port = atoi(colon + 1); *colon = '\0'; }
+        strncpy(iduna_host, host_buf, sizeof(iduna_host) - 1);
+        iduna_host[sizeof(iduna_host) - 1] = '\0';
+        if (port > 0) iduna_port = port;
+    }
+    const char *name = getenv("IDUNA_AGENT_NAME");
+    const char *secret = getenv("IDUNA_AGENT_SECRET");
+    if (name && name[0] && secret && secret[0]) {
+        strncpy(iduna_agent_name, name, sizeof(iduna_agent_name) - 1);
+        iduna_agent_name[sizeof(iduna_agent_name) - 1] = '\0';
+        strncpy(iduna_agent_secret, secret, sizeof(iduna_agent_secret) - 1);
+        iduna_agent_secret[sizeof(iduna_agent_secret) - 1] = '\0';
+        iduna_agent_configured = 1;
+    }
+}
+
+static int hex_decode(const char *hex, unsigned char *out, size_t out_len) {
+    size_t hexlen = strlen(hex);
+    if (hexlen != out_len * 2) return 0;
+    for (size_t i = 0; i < out_len; i++) {
+        unsigned int byte;
+        if (sscanf(hex + i * 2, "%2x", &byte) != 1) return 0;
+        out[i] = (unsigned char)byte;
+    }
+    return 1;
+}
+
+/* Same register+mint round trip as apps/client/bot_main.c's
+ * get_real_wotan_ticket -- ported here rather than shared via a header,
+ * since this codebase duplicates per-binary orchestration logic (see
+ * apps/server vs apps/arena_server) rather than linking .c files across
+ * build targets. */
+static int get_real_wotan_ticket(unsigned char out[ARENA_TICKET_TOTAL_LEN]) {
+    char resp[4096];
+    int status = 0;
+
+    char login_body[512];
+    snprintf(login_body, sizeof(login_body),
+             "{\"agent_name\":\"%s\",\"agent_secret\":\"%s\"}",
+             iduna_agent_name, iduna_agent_secret);
+    if (http_post_json(iduna_host, iduna_port, "/api/v1/auth/agent", NULL,
+                        login_body, resp, sizeof(resp), &status) != 0 || status != 200) {
+        fprintf(stderr, "WOTAN: agent login failed (status=%d)\n", status);
+        return 0;
+    }
+    char token[2048];
+    if (!http_extract_json_string_field(resp, "access_token", token, sizeof(token))) {
+        fprintf(stderr, "WOTAN: agent login response missing access_token\n");
+        return 0;
+    }
+
+    char provider_sub[64];
+    snprintf(provider_sub, sizeof(provider_sub), "player-%d-%u",
+             (int)getpid(), (unsigned int)time(NULL));
+    char register_body[256];
+    snprintf(register_body, sizeof(register_body),
+             "{\"provider\":\"redgarden_bot\",\"provider_sub\":\"%s\"}", provider_sub);
+    if (http_post_json(iduna_host, iduna_port, "/api/v1/players/register", token,
+                        register_body, resp, sizeof(resp), &status) != 0 || status != 200) {
+        fprintf(stderr, "WOTAN: player registration failed (status=%d)\n", status);
+        return 0;
+    }
+    char player_id[64];
+    if (!http_extract_json_string_field(resp, "player_id", player_id, sizeof(player_id))) {
+        fprintf(stderr, "WOTAN: registration response missing player_id\n");
+        return 0;
+    }
+
+    char ticket_body[128];
+    snprintf(ticket_body, sizeof(ticket_body), "{\"player_id\":\"%s\"}", player_id);
+    if (http_post_json(iduna_host, iduna_port, "/api/v1/redgarden/ticket", token,
+                        ticket_body, resp, sizeof(resp), &status) != 0 || status != 200) {
+        fprintf(stderr, "WOTAN: ticket mint failed (status=%d)\n", status);
+        return 0;
+    }
+    char ticket_hex[128];
+    if (!http_extract_json_string_field(resp, "ticket", ticket_hex, sizeof(ticket_hex))) {
+        fprintf(stderr, "WOTAN: ticket response missing ticket field\n");
+        return 0;
+    }
+    if (!hex_decode(ticket_hex, out, ARENA_TICKET_TOTAL_LEN)) {
+        fprintf(stderr, "WOTAN: ticket field was not valid %d-byte hex\n", ARENA_TICKET_TOTAL_LEN);
+        return 0;
+    }
+    printf("WOTAN: real identity registered -- player_id=%s\n", player_id);
+    return 1;
+}
+
+/* Self-mint fallback, same scheme as bot_main.c's mint_ticket -- used only
+ * if IDUNA isn't configured/reachable, so local network-mode testing
+ * without a running IDUNA doesn't hard-fail. */
+static void mint_ticket_fallback(const char *secret, unsigned char out[ARENA_TICKET_TOTAL_LEN]) {
+    unsigned char payload[ARENA_TICKET_PAYLOAD_LEN];
+    for (int i = 0; i < 16; i++) payload[i] = (unsigned char)(rand() & 0xFF);
+    uint32_t expires_at = (uint32_t)time(NULL) + 300;
+    payload[16] = (unsigned char)(expires_at & 0xFF);
+    payload[17] = (unsigned char)((expires_at >> 8) & 0xFF);
+    payload[18] = (unsigned char)((expires_at >> 16) & 0xFF);
+    payload[19] = (unsigned char)((expires_at >> 24) & 0xFF);
+    unsigned char mac[32];
+    hmac_sha256((const unsigned char *)secret, strlen(secret), payload, ARENA_TICKET_PAYLOAD_LEN, mac);
+    memcpy(out, payload, ARENA_TICKET_PAYLOAD_LEN);
+    memcpy(out + ARENA_TICKET_PAYLOAD_LEN, mac, 16);
+}
+
+static int net_connect(const char *host, int port) {
+    net_sock = socket(AF_INET, SOCK_DGRAM, 0);
+    int flags = fcntl(net_sock, F_GETFL, 0);
+    fcntl(net_sock, F_SETFL, flags | O_NONBLOCK);
+
+    net_server_addr.sin_family = AF_INET;
+    net_server_addr.sin_port = htons((uint16_t)port);
+    net_server_addr.sin_addr.s_addr = inet_addr(host);
+
+    unsigned char ticket[ARENA_TICKET_TOTAL_LEN];
+    int have_ticket = 0;
+    if (iduna_agent_configured) {
+        have_ticket = get_real_wotan_ticket(ticket);
+    }
+    if (!have_ticket) {
+        const char *secret = getenv("REDGARDEN_TICKET_SECRET");
+        if (!secret || !secret[0]) {
+            fprintf(stderr, "No WOTAN identity and no REDGARDEN_TICKET_SECRET -- cannot connect.\n");
+            return 0;
+        }
+        fprintf(stderr, "WOTAN: falling back to self-minted ticket (no real identity)\n");
+        mint_ticket_fallback(secret, ticket);
+    }
+
+    char buf[sizeof(NetHeader) + ARENA_TICKET_TOTAL_LEN];
+    NetHeader *h = (NetHeader *)buf;
+    memset(h, 0, sizeof(NetHeader));
+    h->type = PACKET_CONNECT;
+    memcpy(buf + sizeof(NetHeader), ticket, ARENA_TICKET_TOTAL_LEN);
+    sendto(net_sock, buf, sizeof(buf), 0, (struct sockaddr *)&net_server_addr, sizeof(net_server_addr));
+
+    /* Wait (briefly, blocking with retries) for PACKET_WELCOME so we know
+       our own hero slot before the render loop starts. */
+    for (int tries = 0; tries < 100; tries++) {
+        char rbuf[64];
+        struct sockaddr_in sender;
+        socklen_t slen = sizeof(sender);
+        int len = recvfrom(net_sock, rbuf, sizeof(rbuf), 0, (struct sockaddr *)&sender, &slen);
+        if (len >= (int)sizeof(NetHeader)) {
+            NetHeader *rh = (NetHeader *)rbuf;
+            if (rh->type == PACKET_WELCOME) {
+                my_owner = rh->client_id;
+                printf("Connected -- assigned hero slot %d\n", my_owner);
+                return 1;
+            }
+        }
+        SDL_Delay(50);
+        if (tries % 10 == 0) {
+            sendto(net_sock, buf, sizeof(buf), 0, (struct sockaddr *)&net_server_addr, sizeof(net_server_addr));
+        }
+    }
+    fprintf(stderr, "Timed out waiting for server welcome.\n");
+    return 0;
+}
+
+static void net_send_move(float x, float z) {
+    char buf[sizeof(NetHeader) + sizeof(ArenaMoveCmd)];
+    NetHeader *h = (NetHeader *)buf;
+    memset(h, 0, sizeof(NetHeader));
+    h->type = PACKET_ARENA_MOVE;
+    ArenaMoveCmd *cmd = (ArenaMoveCmd *)(buf + sizeof(NetHeader));
+    cmd->target_x = x;
+    cmd->target_z = z;
+    sendto(net_sock, buf, sizeof(buf), 0, (struct sockaddr *)&net_server_addr, sizeof(net_server_addr));
+}
+
+static void net_send_cast(int slot) {
+    char buf[sizeof(NetHeader) + sizeof(ArenaCastCmd)];
+    NetHeader *h = (NetHeader *)buf;
+    memset(h, 0, sizeof(NetHeader));
+    h->type = PACKET_ARENA_CAST;
+    ArenaCastCmd *cmd = (ArenaCastCmd *)(buf + sizeof(NetHeader));
+    cmd->slot = (uint8_t)slot;
+    sendto(net_sock, buf, sizeof(buf), 0, (struct sockaddr *)&net_server_addr, sizeof(net_server_addr));
+}
+
+static void net_poll_snapshots(void) {
+    char rbuf[512];
+    struct sockaddr_in sender;
+    socklen_t slen = sizeof(sender);
+    int len = recvfrom(net_sock, rbuf, sizeof(rbuf), 0, (struct sockaddr *)&sender, &slen);
+    while (len > 0) {
+        if (len >= (int)(sizeof(NetHeader) + sizeof(ArenaSnapshotMsg))) {
+            NetHeader *h = (NetHeader *)rbuf;
+            if (h->type == PACKET_ARENA_SNAPSHOT) {
+                ArenaSnapshotMsg *msg = (ArenaSnapshotMsg *)(rbuf + sizeof(NetHeader));
+                for (int i = 0; i < 2; i++) {
+                    ArenaHero *dst = &arena_state.heroes[i];
+                    dst->x = msg->heroes[i].x;
+                    dst->z = msg->heroes[i].z;
+                    dst->hp = msg->heroes[i].hp;
+                    dst->max_hp = msg->heroes[i].max_hp;
+                    dst->alive = msg->heroes[i].alive;
+                    dst->hero_id = (ArenaHeroID)msg->heroes[i].hero_id;
+                }
+                arena_state.winner = msg->winner;
+            }
+        }
+        len = recvfrom(net_sock, rbuf, sizeof(rbuf), 0, (struct sockaddr *)&sender, &slen);
+    }
+}
+#endif
 
 /* Match event log — MOBA half of NORTHSTAR §12 Phase B (EMILY/BACKLOG.md
  * S170-29), extending apps/server's S170-28 pattern to this demo. Same
@@ -418,6 +673,8 @@ int main(int argc, char *argv[]) {
     ArenaReplay replay;
     int observing = 0;
     uint32_t observe_elapsed_ms = 0;
+    const char *connect_host = NULL;
+    int connect_port = 7200;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--observe") == 0 && i + 1 < argc) {
             if (!arena_replay_load(argv[i + 1], &replay)) {
@@ -426,8 +683,29 @@ int main(int argc, char *argv[]) {
             }
             observing = 1;
             printf("OBSERVER MODE: replaying %s (%d snapshots)\n", argv[i + 1], replay.count);
+        } else if (strcmp(argv[i], "--connect") == 0 && i + 1 < argc) {
+            /* Real networked PvP (NORTHSTAR §13): connect to a real
+               apps/arena_server instead of running the local sim. */
+            connect_host = argv[++i];
+        } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
+            connect_port = atoi(argv[++i]);
         }
     }
+#ifndef _WIN32
+    if (connect_host) {
+        net_mode = 1;
+        load_iduna_agent_config();
+        if (!net_connect(connect_host, connect_port)) {
+            fprintf(stderr, "Failed to connect to arena server at %s:%d\n", connect_host, connect_port);
+            return 1;
+        }
+    }
+#else
+    if (connect_host) {
+        fprintf(stderr, "--connect is not supported on Windows builds yet.\n");
+        return 1;
+    }
+#endif
 
     SDL_Init(SDL_INIT_VIDEO);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -437,7 +715,8 @@ int main(int argc, char *argv[]) {
 
     int win_w = 1280, win_h = 720;
     SDL_Window *win = SDL_CreateWindow(
-        observing ? "RED GARDEN — OBSERVER MODE" : "RED GARDEN — ARENA DEMO",
+        observing ? "RED GARDEN — OBSERVER MODE" :
+        (connect_host ? "RED GARDEN — MOBA (networked PvP)" : "RED GARDEN — MOBA (local)"),
         100, 100, win_w, win_h, SDL_WINDOW_OPENGL);
     if (!win) { fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError()); return 1; }
     SDL_GLContext ctx = SDL_GL_CreateContext(win);
@@ -462,7 +741,10 @@ int main(int argc, char *argv[]) {
     glEnable(GL_DEPTH_TEST);
 
     arena_init();
-    if (!observing) arena_log_open(); /* never write a log while replaying one */
+    /* In net_mode, apps/arena_server is authoritative and writes its own
+       match log -- a local log here would be redundant and would wrongly
+       claim "local_player"/"local_bot" identities for a real match. */
+    if (!observing && !net_mode) arena_log_open();
 
     int dragging_cam = 0;
     int last_mx = 0, last_my = 0;
@@ -512,14 +794,18 @@ int main(int argc, char *argv[]) {
             if (!observing && e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT &&
                 arena_state.winner == 0) {
                 float gx, gz;
-                float focus_x = arena_state.heroes[0].x, focus_z = arena_state.heroes[0].z;
+                float focus_x = arena_state.heroes[my_owner].x, focus_z = arena_state.heroes[my_owner].z;
                 if (screen_to_ground(e.button.x, e.button.y, win_w, win_h, 60.0f,
                                      focus_x, focus_z, &gx, &gz)) {
-                    arena_set_move_target(0, gx, gz);
+#ifndef _WIN32
+                    if (net_mode) net_send_move(gx, gz);
+                    else
+#endif
+                        arena_set_move_target(my_owner, gx, gz);
                     spawn_ring(gx, gz);
                 }
             }
-            if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_r) {
+            if (!net_mode && e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_r) {
                 if (observing) {
                     observe_elapsed_ms = 0; /* restart playback from the beginning */
                     arena_state.winner = 0;
@@ -530,13 +816,23 @@ int main(int argc, char *argv[]) {
                     win_logged = 0;
                 }
             }
-            /* The Unicorn's kit (docs/HEROES_VS0.md) — player hero (owner 0) only,
-             * S170-18. R is already bound to "restart match" in this demo, so the
-             * ultimate goes on E rather than colliding with it. */
+            /* The Unicorn's kit (docs/HEROES_VS0.md) — the local player's own
+             * hero (my_owner) only, S170-18. R is already bound to "restart
+             * match" in local mode, so the ultimate goes on E. In net_mode,
+             * casts are sent to the server, which owns cooldowns/effects. */
             if (!observing && e.type == SDL_KEYDOWN && arena_state.winner == 0) {
-                if (e.key.keysym.sym == SDLK_q) { arena_cast_q(0); arena_log_ability("Q"); }
-                if (e.key.keysym.sym == SDLK_w) { arena_toggle_w(0); arena_log_ability("W"); }
-                if (e.key.keysym.sym == SDLK_e) { arena_cast_r(0); arena_log_ability("R"); }
+#ifndef _WIN32
+                if (net_mode) {
+                    if (e.key.keysym.sym == SDLK_q) net_send_cast(0);
+                    if (e.key.keysym.sym == SDLK_w) net_send_cast(1);
+                    if (e.key.keysym.sym == SDLK_e) net_send_cast(2);
+                } else
+#endif
+                {
+                    if (e.key.keysym.sym == SDLK_q) { arena_cast_q(my_owner); arena_log_ability("Q"); }
+                    if (e.key.keysym.sym == SDLK_w) { arena_toggle_w(my_owner); arena_log_ability("W"); }
+                    if (e.key.keysym.sym == SDLK_e) { arena_cast_r(my_owner); arena_log_ability("R"); }
+                }
             }
         }
 
@@ -544,14 +840,23 @@ int main(int argc, char *argv[]) {
             /* Drive the exact same ArenaState the live path draws from --
              * "same draw code, no second rendering path" (S170-30). */
             arena_replay_apply_at(&replay, observe_elapsed_ms, &arena_state);
-        } else if (arena_state.winner == 0) {
+        }
+#ifndef _WIN32
+        else if (net_mode) {
+            /* apps/arena_server is authoritative -- apply its snapshots
+               rather than running arena_update() locally (that would
+               double-simulate and diverge from the server's own state). */
+            net_poll_snapshots();
+        }
+#endif
+        else if (arena_state.winner == 0) {
             arena_update(dt);
             arena_log_since_snapshot_ms += dt;
             if (arena_log_since_snapshot_ms >= ARENA_LOG_SNAPSHOT_INTERVAL_MS) {
                 arena_log_snapshot();
                 arena_log_since_snapshot_ms = 0;
             }
-        } else if (!win_logged) {
+        } else if (!win_logged && !net_mode) {
             arena_log_win(arena_state.winner);
             win_logged = 1;
         }
@@ -565,7 +870,7 @@ int main(int argc, char *argv[]) {
         glClearColor(0.03f, 0.05f, 0.04f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        float focus_x = arena_state.heroes[0].x, focus_z = arena_state.heroes[0].z;
+        float focus_x = arena_state.heroes[my_owner].x, focus_z = arena_state.heroes[my_owner].z;
         Mat4 view = mat4_orbit_view(focus_x, 0, focus_z, cam_yaw, cam_pitch, cam_dist);
         Mat4 proj = mat4_perspective(60.0f, (float)win_w / (float)win_h, 0.1f, 100.0f);
         Mat4 vp = mat4_multiply(&proj, &view);
@@ -605,7 +910,7 @@ int main(int argc, char *argv[]) {
             Mat4 mvp = mat4_multiply(&vp, &model);
             glUniformMatrix4fv_(loc_mvp, 1, GL_FALSE, mvp.m);
             glUniformMatrix4fv_(loc_model, 1, GL_FALSE, model.m);
-            if (i == 0) glUniform4f_(loc_color, 0.1f, 0.8f, 0.95f, 1.0f);
+            if (i == my_owner) glUniform4f_(loc_color, 0.1f, 0.8f, 0.95f, 1.0f);
             else glUniform4f_(loc_color, 0.95f, 0.25f, 0.15f, 1.0f);
             draw_mesh(&cube_mesh);
         }
@@ -644,7 +949,7 @@ int main(int argc, char *argv[]) {
         draw_string("YOU", 20, win_h - 40.0f, 14);
         glColor3f(1.0f, 1.0f, 1.0f);
         {
-            ArenaHero *h = &arena_state.heroes[0];
+            ArenaHero *h = &arena_state.heroes[my_owner];
             float frac = (float)h->hp / h->max_hp;
             glColor3f(0.2f, 0.2f, 0.2f);
             glBegin(GL_QUADS);
@@ -658,9 +963,9 @@ int main(int argc, char *argv[]) {
             glEnd();
         }
         glColor3f(0.95f, 0.25f, 0.15f);
-        draw_string("BOT", 20, win_h - 70.0f, 14);
+        draw_string(net_mode ? "ENEMY" : "BOT", 20, win_h - 70.0f, 14);
         {
-            ArenaHero *h = &arena_state.heroes[1];
+            ArenaHero *h = &arena_state.heroes[1 - my_owner];
             float frac = (float)h->hp / h->max_hp;
             glColor3f(0.2f, 0.2f, 0.2f);
             glBegin(GL_QUADS);
@@ -675,8 +980,8 @@ int main(int argc, char *argv[]) {
         }
 
         {
-            /* Unicorn kit status (docs/HEROES_VS0.md) — Q/W/E readiness. */
-            ArenaHero *h = &arena_state.heroes[0];
+            /* Own hero's kit status (docs/HEROES_VS0.md) — Q/W/E readiness. */
+            ArenaHero *h = &arena_state.heroes[my_owner];
             char qbuf[24], wbuf[24], ebuf[24];
             snprintf(qbuf, sizeof(qbuf), "Q %s", h->q_cooldown_ms > 0 ? "CD" : "READY");
             snprintf(wbuf, sizeof(wbuf), "W %s", h->w_active ? "ON" : "OFF");
@@ -690,12 +995,14 @@ int main(int argc, char *argv[]) {
             draw_string(ebuf, 220, win_h - 95.0f, 12);
         }
 
-        if (arena_state.winner == 1) {
-            glColor3f(0.2f, 1.0f, 0.4f);
-            draw_string("YOU WIN", win_w / 2.0f - 150, win_h / 2.0f, 24);
-        } else if (arena_state.winner == 2) {
-            glColor3f(1.0f, 0.2f, 0.2f);
-            draw_string("YOU LOSE", win_w / 2.0f - 160, win_h / 2.0f, 24);
+        if (arena_state.winner != 0) {
+            if (arena_state.winner == my_owner + 1) {
+                glColor3f(0.2f, 1.0f, 0.4f);
+                draw_string("YOU WIN", win_w / 2.0f - 150, win_h / 2.0f, 24);
+            } else {
+                glColor3f(1.0f, 0.2f, 0.2f);
+                draw_string("YOU LOSE", win_w / 2.0f - 160, win_h / 2.0f, 24);
+            }
         }
         glEnable(GL_DEPTH_TEST);
 

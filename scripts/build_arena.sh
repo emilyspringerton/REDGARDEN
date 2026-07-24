@@ -10,7 +10,10 @@ mkdir -p "${BUILD_DIR}"
 # GL 3.x entry points itself via SDL_GL_GetProcAddress, so it doesn't need
 # GLU at all (unlike apps/lobby, which is blocked here on a missing
 # libglu1-mesa-dev).
-gcc -std=c99 -O2 -Wall -Wextra -I"${ROOT_DIR}/packages" \
+# -D_DEFAULT_SOURCE: needed by packages/common/http_client.h's getaddrinfo/
+# struct addrinfo/usleep under -std=c99 (same fix already applied to
+# scripts/build.sh for the same reason).
+gcc -std=c99 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -I"${ROOT_DIR}/packages" \
   -o "${BUILD_DIR}/red_garden_arena" \
   "${ROOT_DIR}/apps/arena/src/main.c" \
   "${ROOT_DIR}/packages/simulation/arena_game.c" \
