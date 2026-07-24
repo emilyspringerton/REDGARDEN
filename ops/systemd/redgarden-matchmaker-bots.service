@@ -1,0 +1,39 @@
+# REDGARDEN arena matchmaker — bot pool, 10v10 — user-level systemd unit (no sudo required)
+#
+# Deploy:
+#   mkdir -p ~/.config/systemd/user
+#   cp ops/systemd/redgarden-matchmaker-bots.service ~/.config/systemd/user/
+#   bash scripts/build.sh   # produces build/red_garden_matchmaker + build/red_garden_arena_server
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now redgarden-matchmaker-bots.service
+#
+# Added 2026-07-24 (EMILY/BACKLOG.md S170-65) — the actual root cause of S170-63's outage: this
+# matchmaker had only ever been started manually/nohup'd, with no supervision at all. It died
+# silently at some point mid-session and stayed dead until a founder trying to actually connect
+# noticed. Never again as an unsupervised background process.
+#
+# REDGARDEN_TICKET_SECRET is a shared *test* secret for VS0/VS1 validation (see
+# scripts/test_10_bots.sh), not a real production credential -- matches what apps/arena's client
+# self-mints against when there's no real IDUNA login (no human login flow exists yet).
+
+[Unit]
+Description=REDGARDEN arena matchmaker — bot pool (:7778, 10v10)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/fatbaby/REDGARDEN
+Environment=REDGARDEN_TICKET_SECRET=test-secret-for-vs0-vs1-validation
+ExecStart=/home/fatbaby/REDGARDEN/build/red_garden_matchmaker \
+    --listen-port 7778 \
+    --lobby-size 20 \
+    --server-bin /home/fatbaby/REDGARDEN/build/red_garden_arena_server \
+    --first-game-port 7300
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:/home/fatbaby/REDGARDEN/var/logs/matchmaker-bots.log
+StandardError=append:/home/fatbaby/REDGARDEN/var/logs/matchmaker-bots.log
+MemoryMax=256M
+
+[Install]
+WantedBy=default.target

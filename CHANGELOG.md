@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-07-24 (28)
+
+- ops: real systemd units for the arena matchmaker pools + persistent bot pool (S170-65). Founder,
+  after the S170-63 fix: "fix is not pushed" -- correctly pointing at the actual gap, since the
+  code fix genuinely was pushed and merged, but the live matchmaker processes had *never* run
+  under systemd at all, ever, on this box -- only ever manually nohup'd, which is exactly why
+  S170-63's outage happened in the first place (died silently, stayed dead until someone
+  noticed). New `ops/systemd/redgarden-matchmaker-bots.service`,
+  `redgarden-matchmaker-players.service`, `redgarden-bot-pool.service` (+ new
+  `scripts/run_bot_pool.sh`, a foreground wrapper so systemd can actually supervise the bot set),
+  matching the existing `fatbaby-newssite.service`/`gfd-mud.service` pattern. Deployed and
+  verified live: killed the manual processes, started the units, confirmed `Restart=on-failure`
+  actually works (one stray leftover `arena_server` was squatting on the matchmaker's own port;
+  once killed, systemd auto-relaunched the matchmaker within its restart window with no manual
+  intervention).
+
 ## 2026-07-24 (27)
 
 - fix(ops+ci): matchmakers had died (bots orphaned, queue packets going nowhere) and `PLAY.bat`

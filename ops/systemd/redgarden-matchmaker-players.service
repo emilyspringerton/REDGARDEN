@@ -1,0 +1,36 @@
+# REDGARDEN arena matchmaker — player-only pool, 1v1 — user-level systemd unit (no sudo required)
+#
+# Deploy:
+#   mkdir -p ~/.config/systemd/user
+#   cp ops/systemd/redgarden-matchmaker-players.service ~/.config/systemd/user/
+#   bash scripts/build.sh
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now redgarden-matchmaker-players.service
+#
+# Added 2026-07-24 (EMILY/BACKLOG.md S170-65) — same reasoning as
+# redgarden-matchmaker-bots.service: this pool (S170-14, scripts/launch_arena_pools.sh) had only
+# ever been started manually. No bot is ever pointed at this port -- pool separation is
+# operational (two matchmaker processes, two ports), not access control inside the matchmaker
+# itself.
+
+[Unit]
+Description=REDGARDEN arena matchmaker — player-only pool (:7779, 1v1)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/fatbaby/REDGARDEN
+Environment=REDGARDEN_TICKET_SECRET=test-secret-for-vs0-vs1-validation
+ExecStart=/home/fatbaby/REDGARDEN/build/red_garden_matchmaker \
+    --listen-port 7779 \
+    --lobby-size 2 \
+    --server-bin /home/fatbaby/REDGARDEN/build/red_garden_arena_server \
+    --first-game-port 7600
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:/home/fatbaby/REDGARDEN/var/logs/matchmaker-players.log
+StandardError=append:/home/fatbaby/REDGARDEN/var/logs/matchmaker-players.log
+MemoryMax=256M
+
+[Install]
+WantedBy=default.target

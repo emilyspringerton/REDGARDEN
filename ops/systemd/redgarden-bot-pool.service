@@ -1,0 +1,36 @@
+# REDGARDEN arena persistent bot pool — user-level systemd unit (no sudo required)
+#
+# Deploy:
+#   mkdir -p ~/.config/systemd/user
+#   cp ops/systemd/redgarden-bot-pool.service ~/.config/systemd/user/
+#   bash scripts/build.sh
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now redgarden-bot-pool.service
+#
+# Added 2026-07-24 (EMILY/BACKLOG.md S170-65). Must start after
+# redgarden-matchmaker-bots.service or the bots' first few connect attempts just fail and retry
+# (harmless, but noisy in the log) -- ordered via After=/Wants= below.
+#
+# Supervision granularity: scripts/run_bot_pool.sh exits (and takes the whole pool down with it,
+# via its own cleanup trap) as soon as *any single* bot process dies, and systemd's Restart=
+# relaunches the full set. Coarser than per-bot restart, but simple and correct -- a pool losing
+# one bot briefly to relaunch all 20 is a fine tradeoff against added complexity here.
+
+[Unit]
+Description=REDGARDEN arena persistent bot pool (20 bots -> bot-pool matchmaker :7778)
+After=network-online.target redgarden-matchmaker-bots.service
+Wants=redgarden-matchmaker-bots.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/fatbaby/REDGARDEN
+ExecStartPre=/bin/sleep 2
+ExecStart=/home/fatbaby/REDGARDEN/scripts/run_bot_pool.sh 20
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:/home/fatbaby/REDGARDEN/var/logs/bot-pool.log
+StandardError=append:/home/fatbaby/REDGARDEN/var/logs/bot-pool.log
+MemoryMax=256M
+
+[Install]
+WantedBy=default.target
