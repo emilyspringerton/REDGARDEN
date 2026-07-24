@@ -273,6 +273,25 @@ static int ghost_cast_q(ArenaHero *ghost, ArenaHero *foe) {
     return 1;
 }
 
+/* frog_cast_q: Loop Back, rewinds the Frog's own position/HP to
+ * ARENA_FROG_Q_REWIND_MS ago using the loopback ring buffer any hero
+ * accumulates in tick_hero_kit. Self-targeted, so it always "lands" once
+ * called (unlike Duck/Ghost, there's no range/hittability check -- you
+ * can't whiff a rewind on yourself). If less history exists than the full
+ * rewind window (e.g. cast in the first few seconds of a match), rewinds
+ * as far back as is actually recorded rather than refusing to cast at all. */
+static void frog_cast_q(ArenaHero *frog) {
+    if (frog->loopback_count == 0) return; /* no history yet at all */
+    int slots_back = ARENA_FROG_Q_REWIND_MS / ARENA_FROG_LOOPBACK_SAMPLE_MS;
+    if (slots_back >= frog->loopback_count) slots_back = frog->loopback_count - 1;
+    int idx = ((frog->loopback_next_slot - 1 - slots_back) % ARENA_FROG_LOOPBACK_SLOTS
+               + ARENA_FROG_LOOPBACK_SLOTS) % ARENA_FROG_LOOPBACK_SLOTS;
+    frog->x = frog->loopback_x[idx];
+    frog->z = frog->loopback_z[idx];
+    frog->hp = frog->loopback_hp[idx];
+    frog->moving = 0;
+}
+
 void arena_cast_q(int owner) {
     if (owner < 0 || owner > 1) return;
     ArenaHero *h = &arena_state.heroes[owner];
@@ -292,6 +311,10 @@ void arena_cast_q(int owner) {
         if (ghost_cast_q(h, foe)) {
             h->q_cooldown_ms = ARENA_GHOST_Q_COOLDOWN_MS;
         }
+        break;
+    case ARENA_HERO_FROG:
+        frog_cast_q(h);
+        h->q_cooldown_ms = ARENA_FROG_Q_COOLDOWN_MS;
         break;
     }
 }
@@ -314,9 +337,10 @@ void arena_toggle_w(int owner) {
         h->w_cooldown_ms = ARENA_GHOST_W_COOLDOWN_MS;
         break;
     default:
-        /* The Duck's W (Government Clearance) needs objective structures
-           that don't exist here -- no-op for any hero without a real W in
-           this arena, not a crash or a silent wrong kit. */
+        /* No-op for any hero without a real W in this arena, not a crash
+           or a silent wrong kit: Duck's W (Government Clearance) needs
+           objective structures that don't exist here; Frog's W (Borrowed
+           Time) is ally-targeted and there's no ally in a 1v1. */
         break;
     }
 }
@@ -347,6 +371,15 @@ void arena_cast_r(int owner) {
         h->r_active_ms = ARENA_GHOST_R_DURATION_MS;
         h->r_cooldown_ms = ARENA_GHOST_R_COOLDOWN_MS;
         break;
+    case ARENA_HERO_FROG:
+        /* The Secret, simplified: reuses the intangible_ms mechanic at a
+           longer duration. "Reappear at any visited location" needs its
+           own location-memory system -- not implemented, so this reappears
+           in place, flagged as a simplification rather than the full
+           ability. */
+        h->intangible_ms = ARENA_FROG_R_VANISH_MS;
+        h->r_cooldown_ms = ARENA_FROG_R_COOLDOWN_MS;
+        break;
     }
 }
 
@@ -364,6 +397,25 @@ static void tick_hero_kit(ArenaHero *h, ArenaHero *foe, unsigned int dt_ms) {
     if (h->intangible_ms > 0) {
         h->intangible_ms -= (int)dt_ms;
         if (h->intangible_ms < 0) h->intangible_ms = 0;
+    }
+
+    /* Loop Back's history ring buffer (S170-33) is sampled for every hero,
+       not just whoever's playing Frog -- same "generic state, only one
+       kit reads it today" reasoning as the status-effect fields. Samples
+       while alive only: rewinding into a pre-death state is the ability's
+       whole point, but there's nothing meaningful to record once a match
+       has already ended for this hero. */
+    if (h->alive) {
+        h->loopback_since_sample_ms += (int)dt_ms;
+        while (h->loopback_since_sample_ms >= ARENA_FROG_LOOPBACK_SAMPLE_MS) {
+            h->loopback_since_sample_ms -= ARENA_FROG_LOOPBACK_SAMPLE_MS;
+            int slot = h->loopback_next_slot;
+            h->loopback_x[slot] = h->x;
+            h->loopback_z[slot] = h->z;
+            h->loopback_hp[slot] = h->hp;
+            h->loopback_next_slot = (slot + 1) % ARENA_FROG_LOOPBACK_SLOTS;
+            if (h->loopback_count < ARENA_FROG_LOOPBACK_SLOTS) h->loopback_count++;
+        }
     }
 
     switch (h->hero_id) {
@@ -432,6 +484,16 @@ static void bot_cast_kit_if_ready(ArenaHero *bot, ArenaHero *foe) {
             arena_cast_q(bot->owner);
         } else if (bot->r_cooldown_ms <= 0 && dist <= ARENA_GHOST_R_RADIUS) {
             arena_cast_r(bot->owner);
+        }
+        break;
+    case ARENA_HERO_FROG:
+        /* Defensive kit, so the heuristic is defensive too: rewind when
+           hurt, vanish when critical -- not "attack when in range" like
+           the other three, since Frog has no damage-dealing ability. */
+        if (bot->hp < bot->max_hp / 4 && bot->r_cooldown_ms <= 0) {
+            arena_cast_r(bot->owner);
+        } else if (bot->hp < bot->max_hp / 2 && bot->q_cooldown_ms <= 0) {
+            arena_cast_q(bot->owner);
         }
         break;
     }

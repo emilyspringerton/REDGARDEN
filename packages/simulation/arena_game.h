@@ -17,6 +17,7 @@ typedef enum {
     ARENA_HERO_UNICORN = 0,
     ARENA_HERO_DUCK = 1,
     ARENA_HERO_GHOST = 2,
+    ARENA_HERO_FROG = 3,
 } ArenaHeroID;
 
 /* The Unicorn — first real hero kit wired in (S170-18). */
@@ -61,6 +62,21 @@ typedef enum {
 #define ARENA_GHOST_R_DPS           6     /* damage/sec to enemies standing in the zone */
 #define ARENA_GHOST_R_COOLDOWN_MS   20000
 
+/* The Frog — fourth hero kit (S170-33), the last clean-fit pick from
+ * S170-32's roster audit. W (Borrowed Time, ally-cooldown-refund) is
+ * ally-targeted -- no ally in 1v1, skipped, flagged. R (The Secret) is
+ * simplified to reuse Ghost's intangible_ms mechanic at a longer duration;
+ * "reappear at any visited location" needs its own location-memory system,
+ * deferred, not faked as the full ability. Passive (Never Told Anyone, no
+ * visible cooldown UI for enemies) is a bluffing/UI concept -- arena has no
+ * separate enemy-facing view to hide anything from, skipped, flagged. */
+#define ARENA_FROG_LOOPBACK_SAMPLE_MS 250 /* Q — Loop Back: how often position/HP is sampled */
+#define ARENA_FROG_LOOPBACK_SLOTS     16  /* 16 * 250ms = 4000ms of history, enough to rewind 3s */
+#define ARENA_FROG_Q_REWIND_MS      3000
+#define ARENA_FROG_Q_COOLDOWN_MS    8000
+#define ARENA_FROG_R_VANISH_MS      5000  /* The Secret, simplified (see comment above) */
+#define ARENA_FROG_R_COOLDOWN_MS    25000
+
 typedef struct {
     float x, z;
     float target_x, target_z;
@@ -89,6 +105,16 @@ typedef struct {
      * apply them, but the fields aren't Ghost-specific). */
     int silenced_ms;    /* > 0: cannot cast Q/W/R */
     int intangible_ms;  /* > 0: cannot be hit by attacks or ability damage */
+    /* The Frog's Loop Back (S170-33): a small ring buffer of this hero's
+     * own past (x, z, hp), sampled every ARENA_FROG_LOOPBACK_SAMPLE_MS.
+     * Generic per-hero state, not Frog-specific storage, same reasoning as
+     * the status-effect fields above -- nothing else uses it yet. */
+    float loopback_x[ARENA_FROG_LOOPBACK_SLOTS];
+    float loopback_z[ARENA_FROG_LOOPBACK_SLOTS];
+    int loopback_hp[ARENA_FROG_LOOPBACK_SLOTS];
+    int loopback_count;       /* how many slots have ever been written (caps at ARENA_FROG_LOOPBACK_SLOTS) */
+    int loopback_next_slot;   /* next slot to write (wraps) */
+    int loopback_since_sample_ms;
 } ArenaHero;
 
 typedef struct {

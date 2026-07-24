@@ -356,6 +356,70 @@ static void test_ghost_r_zone_stays_fixed_when_foe_moves_away(void) {
     CHECK(foe->hp == foe_hp_before, "a foe standing outside the fixed zone takes no zone damage");
 }
 
+/* --- The Frog's kit (docs/HEROES_VS0.md, EMILY/BACKLOG.md S170-33) --- */
+
+static void test_frog_q_rewinds_position_and_hp(void) {
+    arena_init_with_heroes(ARENA_HERO_FROG, ARENA_HERO_UNICORN);
+    ArenaHero *frog = &arena_state.heroes[0];
+    ArenaHero *foe = &arena_state.heroes[1];
+    /* Placed at opposite extremes so the bot-controlled foe's chase (S170-31's
+       heuristic AI, unrelated to this test) can't close to melee range
+       during the history-building window and confound the HP value. */
+    frog->x = -12.0f; frog->z = 0.0f;
+    foe->x = 12.0f; foe->z = 0.0f;
+
+    /* Build more than 3s of loopback history at this position/HP. */
+    for (int i = 0; i < 14; i++) arena_update(250); /* 14 * 250ms = 3500ms */
+    float historical_x = frog->x;
+    int historical_hp = frog->hp;
+
+    /* Simulate a fight happening after the history was recorded. */
+    frog->x = -2.0f;
+    frog->hp = 30;
+
+    arena_cast_q(0);
+
+    CHECK(frog->hp == historical_hp, "Q restores HP from ~3s ago");
+    CHECK(fabsf(frog->x - historical_x) < 0.01f, "Q restores position from ~3s ago");
+    CHECK(frog->q_cooldown_ms == ARENA_FROG_Q_COOLDOWN_MS, "Q starts on cooldown after cast");
+}
+
+static void test_frog_q_uses_oldest_available_history_before_3s_elapsed(void) {
+    arena_init_with_heroes(ARENA_HERO_FROG, ARENA_HERO_UNICORN);
+    ArenaHero *frog = &arena_state.heroes[0];
+    ArenaHero *foe = &arena_state.heroes[1];
+    frog->x = -12.0f; foe->x = 12.0f;
+
+    arena_update(250); /* exactly one sample, well under the 3s window */
+    int historical_hp = frog->hp;
+
+    frog->hp = 10; /* simulate damage */
+    arena_cast_q(0);
+
+    CHECK(frog->hp == historical_hp,
+          "with less than 3s of history, Q rewinds to the oldest sample available instead of refusing to cast");
+}
+
+static void test_frog_r_vanishes(void) {
+    arena_init_with_heroes(ARENA_HERO_FROG, ARENA_HERO_UNICORN);
+    ArenaHero *frog = &arena_state.heroes[0];
+
+    arena_cast_r(0);
+
+    CHECK(frog->intangible_ms == ARENA_FROG_R_VANISH_MS, "R grants intangibility for the vanish duration");
+    CHECK(frog->r_cooldown_ms == ARENA_FROG_R_COOLDOWN_MS, "R starts on its own cooldown after cast");
+}
+
+static void test_frog_has_no_w(void) {
+    arena_init_with_heroes(ARENA_HERO_FROG, ARENA_HERO_UNICORN);
+    ArenaHero *frog = &arena_state.heroes[0];
+
+    arena_toggle_w(0);
+
+    CHECK(frog->w_active == 0 && frog->intangible_ms == 0,
+          "toggling W for The Frog is a no-op -- Borrowed Time is ally-targeted, no ally in 1v1");
+}
+
 int main(void) {
     printf("RED GARDEN arena_game headless smoke test\n\n");
     test_movement_reaches_target();
@@ -381,6 +445,10 @@ int main(void) {
     test_intangible_hero_cannot_be_hit();
     test_ghost_r_zone_damages_foe_over_time();
     test_ghost_r_zone_stays_fixed_when_foe_moves_away();
+    test_frog_q_rewinds_position_and_hp();
+    test_frog_q_uses_oldest_available_history_before_3s_elapsed();
+    test_frog_r_vanishes();
+    test_frog_has_no_w();
     printf("\n%s\n", failures == 0 ? "ALL PASS" : "SOME FAILED");
     return failures == 0 ? 0 : 1;
 }

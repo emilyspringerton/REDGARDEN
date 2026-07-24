@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-07-24 (7)
+
+- NORTHSTAR §12 Phase D (S170-33) — fourth hero, **The Frog**, the last clean-fit hero from
+  S170-32's roster audit: Q (Loop Back) rewinds the Frog's own position/HP to ~3s ago via a new
+  per-hero loopback ring buffer (16 slots, 250ms sample rate, sampled generically for every hero);
+  degrades to the oldest available sample rather than refusing to cast if less than 3s of history
+  exists yet. R (The Secret) reuses Ghost's `intangible_ms` mechanic at a longer duration --
+  "reappear at a chosen location" isn't built, flagged as a simplification. W (ally-targeted) and
+  the passive (UI-only) are skipped, same reasoning as other skips this phase. Bot heuristic is
+  defensive (rewind when hurt, vanish when critical) since Frog deals no damage. 4 new tests, all
+  green alongside the full existing suite. Arena has now absorbed every roster-fit hero from the
+  audit -- the 8 structurally-blocked heroes need arena to grow new systems first, a real decision
+  point flagged in the northstar rather than continuing to just pick the next one.
+
 ## 2026-07-24 (6)
 
 - NORTHSTAR §12 Phase D (S170-32) — third hero, **The Ghost**: Q (skillshot simplified to

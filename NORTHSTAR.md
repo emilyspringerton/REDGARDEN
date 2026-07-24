@@ -473,9 +473,29 @@ per 16ms tick and truncates to 0 almost every tick in real gameplay, only "worki
 advance time in one big 1000ms step); that pre-existing bug is flagged here, not fixed, since
 fixing it is unrelated to this pass's scope.
 
-7 new headless tests, all green alongside the full existing suite. **Not done yet — Frog** (the
-other hero that fits arena's constraints) and **the 9 heroes structurally blocked above**. Each is
-its own follow-on pass — "not all at once, obviously in phases" applies inside Phase D too.
+7 new headless tests, all green alongside the full existing suite.
+
+**Fourth hero: The Frog (2026-07-24, S170-33)** — the last clean-fit hero from the audit above.
+Q (Loop Back: rewind own position/HP to ~3s ago) needed arena's first history mechanism: a
+per-hero ring buffer (`loopback_x/z/hp`, 16 slots at a 250ms sample rate — 4s of coverage), sampled
+generically for every hero in `tick_hero_kit` the same way status effects are, not gated to
+whichever kit currently reads it. If cast before 3s of real history exists (e.g. early in a match),
+it rewinds to the oldest sample available rather than refusing to cast — an honest degrade, not a
+silent no-op. R (The Secret) is simplified to reuse Ghost's `intangible_ms` mechanic at a longer
+duration; "reappear at any visited location" needs its own location-memory system, not built here,
+flagged as a simplification rather than faked as the full ability. W (Borrowed Time, ally-targeted)
+and the passive (bluffing/UI-only) are skipped, same reasoning as other ally- and UI-dependent
+skips elsewhere in this phase. Bot heuristic is defensive-shaped (rewind when hurt, vanish when
+critical) rather than "attack when in range," since Frog has no damage-dealing ability at all. 4
+new tests, all green alongside the full existing suite — including one proving the "not enough
+history yet" degrade path specifically, not just the common case.
+
+**Not done yet — the 8 heroes structurally blocked by the roster audit above** (Donkey, Tree,
+Pizza, Retrieval Cart, Doc Wheel, TYLER, Flamel, Druid). Arena has now absorbed every hero that
+fits its current constraints without arena itself growing new systems (allies, grid, multi-unit,
+cooking) — the next roster move is either building one of those systems, or treating arena's
+4-hero roster as complete for this testbed's purposes. That's a real decision point, not
+continuing the same "pick the next one" pattern blindly.
 
 **Phase E — Game AI: reuse existing org tech, don't invent a parallel stack.** Founder: "using the
 full depth breadth and width of einhorn ai tech for games" → "incorporate all of the tech into the
