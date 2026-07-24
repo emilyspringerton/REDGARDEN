@@ -714,9 +714,21 @@ with 23 matches played, real accumulated W/L); zero connect failures after the r
 phantom match servers (when they do occur) self-terminate within roughly 60-100s instead of leaking
 forever (confirmed by watching one exit in real time, not just inferring it).
 
-**Explicitly still unverified, honestly flagged:** the actual 10v10 (`--lobby-size 20`) path has the
-same code as the verified 1v1 path (`arena_update_teams`, `arena_init_teams`, team assignment,
-`arena_nearest_enemy` all headless-tested) but has not itself been run live end-to-end with 20 real
-bot connections — that's the direct next verification step, not assumed passing by extension. The
-human-facing SDL2 client's rendering of a live networked match (team-colored heroes, HUD) has not
-been visually confirmed on this box (no Xvfb, the same standing constraint as the local demo).
+**Update, same day — the actual 10v10 path run live end-to-end, not assumed passing by extension.**
+`--lobby-size 20` against 20 real `apps/arena_bot` processes: all 20 connected, all 20 drafted a
+hero (team 0 = owners 0-9, team 1 = owners 10-19, confirmed correct in the wire snapshots), combat
+resolved across 20 heroes simultaneously, and the match correctly ended on a real team-wipe
+(`{"event":"match_end","winner":1,...}` with team 1's owners 10-19 all showing `alive:0` and team
+0 having real survivors at real HP values — not a forced/simulated result). All 20 bots then
+persisted and requeued into a **second** full 20-player match without any manual intervention —
+confirmed via every bot log showing exactly 2 "match ended" lines and still exactly 1 "WOTAN: real
+identity" line each (the identity-persistence fix holds at 20-bot scale, not just 1v1). Server
+process count stayed healthy (single digits) throughout, not the dozens-of-zombies pileup seen
+before the shutdown-timer/timeout fixes. This closes the "still unverified" gap from earlier the
+same day — 10v10 is real, not just headless-tested code assumed to generalize correctly.
+
+**Still genuinely unverified, honestly flagged:** the human-facing SDL2 client's rendering of a
+live networked match (team-colored heroes, HUD, camera) has not been visually confirmed on this
+box (no Xvfb) — everything verified above is from the wire protocol and match logs, not from
+looking at a rendered frame. That remains the one real gap between "the system works" and "a human
+has seen it work."
