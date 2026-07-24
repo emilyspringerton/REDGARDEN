@@ -27,7 +27,13 @@ typedef enum {
     ARENA_HERO_GHOST = 2,
     ARENA_HERO_FROG = 3,
     ARENA_HERO_DOC_WHEEL = 4,
+    ARENA_HERO_TREE = 5,
+    ARENA_HERO_PIZZA = 6,
+    ARENA_HERO_FLAMEL = 7, /* merged with the former "Druid" archetype, 2026-07-24 -- see docs/HEROES_VS0.md */
+    ARENA_HERO_MORRIGAN = 8,
+    ARENA_HERO_DAGDA = 9,
 } ArenaHeroID;
+#define ARENA_HERO_COUNT 10
 
 /* The Unicorn — first real hero kit wired in (S170-18). */
 #define ARENA_UNICORN_ARMOR         4    /* passive: Chassis Claim, flat dmg reduction */
@@ -110,6 +116,146 @@ typedef enum {
 #define ARENA_DOC_WHEEL_R_HEAL        20   /* teamwide heal (R, simplified from a shield) */
 #define ARENA_DOC_WHEEL_R_COOLDOWN_MS 30000
 
+/* Territory / node system (S170-46, NORTHSTAR §13 cont'd) -- the founder's
+ * "territory/resource economy" pick over allies-scaling or non-piloted
+ * units. Extends the two vestigial, gameplay-inert ArenaNode markers
+ * (previously rendered-only, apps/arena/src/main.c) into a real capture
+ * contest: each node accumulates signed `pressure` from weighted nearby
+ * team presence, and `owner` derives from pressure crossing a threshold.
+ * This is the enabling system for Tree (Root Network), Pizza (corruption),
+ * and Flamel (Overgrowth marking, absorbed from the former Druid) -- the
+ * three heroes S170-32's roster audit flagged as blocked on exactly this. */
+#define ARENA_NODE_CAPTURE_RADIUS     5.0f
+#define ARENA_NODE_PRESSURE_RATE      8.0f  /* pressure/sec toward the team with more weighted presence */
+#define ARENA_NODE_DECAY_RATE         4.0f  /* pressure/sec drift toward neutral when tied/uncontested */
+#define ARENA_NODE_OWNER_THRESHOLD    50.0f /* |pressure| >= this crosses from contested (0) to owned (1/2) */
+#define ARENA_TREE_CAPTURE_WEIGHT     2     /* Root Network: Tree counts double for capture pull while standing still or not */
+#define ARENA_FLAMEL_MARK_MS          6000  /* Overgrowth: how long a mark persists once Flamel leaves */
+#define ARENA_FLAMEL_MARK_BONUS_RATE  6.0f  /* extra pressure/sec pull toward the marking team on a marked-but-still-neutral node -- deterministic simplification of the doc's "increased chance of converting," flagged */
+#define ARENA_PIZZA_CORRUPT_PULL_RATE 5.0f  /* Uninvestigated Fire: while a Pizza (either team) stands in radius, pulls pressure toward neutral regardless of team composition -- simplification of the doc's true 4-state CORRUPTED concept, flagged */
+
+/* Tree — sixth hero kit (S170-46). Passive (Root Network) needs no ability
+ * code at all -- arena_tick_nodes reads hero_id directly and applies
+ * ARENA_TREE_CAPTURE_WEIGHT. Q (Vine Lash) simplifies "AoE root in a cone
+ * in front" to an instant hit-if-in-range check, same precedent as Ghost's
+ * Alien Frequency. W (Untranslated, ally CC-immunity) is unbuildable --
+ * arena has no interrupt/channel mechanic at all, every cast is instant --
+ * skipped, flagged, same reasoning as other mechanic-less passives. R
+ * (Grand Secret) simplifies "roots permanently until recast, min 8s" to a
+ * fixed-duration self-root + armor buff, same "fixed duration" simplification
+ * already used for Frog's R and Ghost's R zone. */
+#define ARENA_TREE_Q_RANGE         6.0f
+#define ARENA_TREE_Q_DAMAGE        10
+#define ARENA_TREE_Q_ROOT_MS       1500
+#define ARENA_TREE_Q_COOLDOWN_MS   5000
+#define ARENA_TREE_R_ROOT_MS       8000  /* Grand Secret: self-root, min 8s per the doc */
+#define ARENA_TREE_R_ARMOR_BONUS   8
+#define ARENA_TREE_R_HEAL          30
+#define ARENA_TREE_R_COOLDOWN_MS   25000
+
+/* Pizza — seventh hero kit (S170-46). Passive (Uninvestigated Fire) is an
+ * always-on burn aura (AP-scaling simplified to flat DPS, same precedent as
+ * Ghost's flat R_DPS) plus the node-corruption pull handled generically in
+ * arena_tick_nodes. Q (Nobody Checked) simplifies "throw a burning slice +
+ * ground patch" to direct damage + a burn DoT applied straight to the foe --
+ * no persistent ground-hazard system exists, so the lingering-patch half is
+ * dropped, not faked. W (I Am The Chosen One) is pure-visual, zero mechanical
+ * effect per the doc itself -- skipped, flagged, same reasoning as Duck's W
+ * and Ghost's passive. R (Nobody Ever Checks) is built for real: a damage
+ * floor status effect, the one piece of this roster's simplifications that
+ * needed apply_damage() centralized rather than shortcut. */
+#define ARENA_PIZZA_AURA_RADIUS    3.5f
+#define ARENA_PIZZA_AURA_DPS       4
+#define ARENA_PIZZA_Q_RANGE        6.0f
+#define ARENA_PIZZA_Q_DAMAGE       8
+#define ARENA_PIZZA_Q_BURN_MS      3000
+#define ARENA_PIZZA_Q_BURN_DPS     5
+#define ARENA_PIZZA_Q_COOLDOWN_MS  4500
+#define ARENA_PIZZA_R_FLOOR_MS     4000
+#define ARENA_PIZZA_R_COOLDOWN_MS  28000
+
+/* Flamel — eighth hero kit (S170-46), merged with the former "Druid" archetype
+ * per founder direction ("druid and flamel should be the same hero") --
+ * docs/HEROES_VS0.md carries the full merge rationale. Passive (Great Work +
+ * Overgrowth) needs no ability code for the marking half (arena_tick_nodes
+ * reads hero_id directly, same as Tree); the cooking-bonus half is out of
+ * scope this pass (docs/CONSUMABLES_AND_COOKING.md isn't wired to any hero
+ * kit yet) -- skipped, flagged, not faked. Q (Vine Growth) simplifies "wall
+ * of vines in a line" to an instant root-if-in-range check on the nearest
+ * enemy, same cone/line-to-single-target-range simplification as Tree's Q.
+ * W (Philosopher's Bloom) merges Bloom + Philosopher's Batch into one AoE
+ * ally heal with a marked-node bonus. R (Elixir of Wild Growth) merges
+ * Elixir's team-ultimate framing with Wild Growth's AoE shape: a fixed
+ * zone (reusing Ghost's r_zone_x/z/tick_ms fields) that roots enemies and
+ * heals allies each tick for its duration, plus a one-time mass-mark of
+ * nodes in radius at cast time. The "heavy slow" from the doc is simplified
+ * to a full root -- no per-hero movement-speed-multiplier system exists in
+ * this arena yet, flagged. */
+#define ARENA_FLAMEL_Q_RANGE         5.5f
+#define ARENA_FLAMEL_Q_ROOT_MS       1500
+#define ARENA_FLAMEL_Q_COOLDOWN_MS   5500
+#define ARENA_FLAMEL_W_RADIUS        4.5f
+#define ARENA_FLAMEL_W_HEAL_BASE     10
+#define ARENA_FLAMEL_W_HEAL_MARKED   18  /* Philosopher's Bloom: more healing cast on Flamel's own marked ground */
+#define ARENA_FLAMEL_W_COOLDOWN_MS   9000
+#define ARENA_FLAMEL_R_RADIUS        5.0f
+#define ARENA_FLAMEL_R_DURATION_MS   4000
+#define ARENA_FLAMEL_R_ROOT_MS       1200 /* refreshed each 1000ms tick an enemy stays in the zone */
+#define ARENA_FLAMEL_R_HEAL_PER_TICK 8
+#define ARENA_FLAMEL_R_COOLDOWN_MS   32000
+
+/* Morrigan — ninth hero kit (S170-47, TYLER multiverse_heroes.md #68). A
+ * war/death goddess whose whole hook (per the doc's own "flagged, not
+ * built" note in HEROES_VS0.md) is rock-paper-scissors counter-play
+ * against Flamel's life/growth kit -- founder direction calls her a "meta
+ * jungler." No standalone jungle-camp system exists in this arena, so her
+ * jungler identity is expressed the same way Tree/Pizza/Flamel's territory
+ * hooks are: tied to the ArenaNode contest that already exists, rather than
+ * inventing a second system. Passive rewards standing in neutral/contested
+ * ground (a war goddess belongs to the unresolved fight, not settled
+ * territory). Q and R both scale up against a low-HP target -- "the crow
+ * confirms the kill," matching the lore's death-omen framing, and mirroring
+ * (inverted) Doc Wheel's heal-more-when-hurt math. W (the eel/wolf/heifer
+ * animal-form harassment scene) is a sudden gap-close + root onto the
+ * nearest enemy -- "she appears where he doesn't expect." */
+#define ARENA_MORRIGAN_PASSIVE_ARMOR_BONUS 4   /* Contested Ground: bonus armor while standing on a contested (owner==0) node */
+#define ARENA_MORRIGAN_Q_RANGE          6.0f
+#define ARENA_MORRIGAN_Q_DAMAGE_BASE    8      /* The Washer's Strike, at 100% target HP */
+#define ARENA_MORRIGAN_Q_DAMAGE_LOW_HP  18     /* at ~0% target HP -- an execute, damage scales up as the target dies */
+#define ARENA_MORRIGAN_Q_COOLDOWN_MS    4000
+#define ARENA_MORRIGAN_W_ROOT_MS        1200   /* Three Forms: gap-close + root on arrival */
+#define ARENA_MORRIGAN_W_COOLDOWN_MS    7000
+#define ARENA_MORRIGAN_R_RADIUS         4.5f
+#define ARENA_MORRIGAN_R_DURATION_MS    3500
+#define ARENA_MORRIGAN_R_DAMAGE_BASE    4      /* The Crow Confirms It: per-tick execute DPS, at 100% target HP */
+#define ARENA_MORRIGAN_R_DAMAGE_LOW_HP  12     /* per-tick DPS at ~0% target HP */
+#define ARENA_MORRIGAN_R_COOLDOWN_MS    24000
+
+/* Dagda — tenth hero kit (S170-47, TYLER multiverse_heroes.md #69). "The
+ * wheeled club settles every argument twice" -- one end kills, the other
+ * revives, same tool, depending only on which end swings first. Built
+ * literally: Q checks what's in range and picks the end. The cauldron
+ * (Undry, "never runs empty") is a passive sustain regen. The harp
+ * (Uaithne's three master strains, sorrow/joy/sleep, played over an entire
+ * hall in one go) is one AoE cast hitting everyone in range at once --
+ * enemies get sorrow+sleep (root+silence), allies get joy (heal). The
+ * force-fed porridge scene ("eats every bite, unhurt, fights the next day
+ * regardless") is a damage floor + a real heal, not just survival --
+ * enduring AND coming out ahead. */
+#define ARENA_DAGDA_PASSIVE_REGEN_PER_SEC 3   /* The Undry: passive self HP regen, always on */
+#define ARENA_DAGDA_Q_RANGE           5.5f
+#define ARENA_DAGDA_Q_KILL_DAMAGE     16      /* the killing end of the club */
+#define ARENA_DAGDA_Q_REVIVE_HEAL     16      /* the reviving end, simplified to a heal -- no respawn system exists to revive into */
+#define ARENA_DAGDA_Q_COOLDOWN_MS     5000
+#define ARENA_DAGDA_W_RADIUS          4.5f
+#define ARENA_DAGDA_W_ROOT_MS         1200    /* sorrow */
+#define ARENA_DAGDA_W_SILENCE_MS      1200    /* sleep */
+#define ARENA_DAGDA_W_ALLY_HEAL       10      /* joy */
+#define ARENA_DAGDA_W_COOLDOWN_MS     11000
+#define ARENA_DAGDA_R_FLOOR_MS        3000    /* the porridge: a real damage floor */
+#define ARENA_DAGDA_R_HEAL            30      /* ...and still comes out ahead, not just surviving */
+#define ARENA_DAGDA_R_COOLDOWN_MS     26000
+
 typedef struct {
     float x, z;
     float target_x, target_z;
@@ -140,6 +286,31 @@ typedef struct {
      * apply them, but the fields aren't Ghost-specific). */
     int silenced_ms;    /* > 0: cannot cast Q/W/R */
     int intangible_ms;  /* > 0: cannot be hit by attacks or ability damage */
+    /* rooted_ms (S170-46, Tree's Q/R and Flamel's Q/R): > 0: cannot move,
+     * even with a move command already queued -- gated in
+     * update_hero_motion. Also read by duck_pull_foe as "immune to
+     * displacement," honoring Tree's R without a separate generic
+     * displacement-immunity field: rooted already means "an external force
+     * can't move you" is a natural extension of "you can't move yourself." */
+    int rooted_ms;
+    /* burning_ms/burn_dps (S170-46, Pizza's Q): a generic damage-over-time
+     * debuff, any hero's kit could apply it, not Pizza-specific storage --
+     * same reasoning as the other status-effect fields above. Ticks down
+     * and deals burn_dps once per 1000ms via burn_tick_ms, mirroring Ghost's
+     * R zone's fixed-interval tick. */
+    int burning_ms;
+    int burn_dps;
+    int burn_tick_ms;
+    /* survive_floor_ms (S170-46, Pizza's R "Nobody Ever Checks"): > 0: this
+     * hero's HP cannot be reduced below 1 by apply_damage, no matter how
+     * much raw damage lands -- built for real (not simplified away) since
+     * it's the entire point of the ability, using the same centralized
+     * apply_damage() every damage call site already routes through. */
+    int survive_floor_ms;
+    /* aura_tick_ms (S170-46, Pizza's always-on burn aura passive): generic
+     * fixed-interval accumulator for a passive that ticks independently of
+     * any cast, distinct from r_zone_tick_ms (which is cast-scoped). */
+    int aura_tick_ms;
     /* next_cast_refund: generic ally-buff flag (S170-45, Frog's Borrowed
      * Time places this on an ally, not itself) -- the next successful Q/W/R
      * cast by whoever carries this flag has its cooldown refunded to 0
@@ -161,6 +332,15 @@ typedef struct {
 
 typedef struct {
     float x, z;
+    /* pressure/owner/marked_* (S170-46): the territory contest state.
+     * pressure ranges -100..100 (positive = team 0-leaning, negative =
+     * team 1-leaning); owner derives from pressure crossing
+     * ARENA_NODE_OWNER_THRESHOLD, recomputed every tick by
+     * arena_tick_nodes -- not set directly anywhere else. */
+    float pressure;
+    int owner;           /* 0 = neutral/contested, 1 = team 0, 2 = team 1 */
+    int marked_by_team;  /* -1 = unmarked, else team index (Flamel's Overgrowth, absorbed from Druid) */
+    int mark_ms_remaining;
 } ArenaNode;
 
 typedef struct {
@@ -209,6 +389,15 @@ ArenaHero *arena_nearest_enemy(int owner);
  * teammate exists) or if owner has no living ally right now -- callers
  * must already be NULL-safe the same way they are for arena_nearest_enemy. */
 ArenaHero *arena_nearest_ally(int owner);
+
+/* arena_tick_nodes (S170-46): advances the territory contest for every
+ * ArenaNode by dt_ms -- weighted team presence within
+ * ARENA_NODE_CAPTURE_RADIUS drifts pressure, Flamel's Overgrowth mark
+ * decays/refreshes, Pizza's corruption pulls toward neutral. Called from
+ * both arena_update() (1v1, nodes[] already positioned) and
+ * arena_update_teams(), same "generalizes cleanly, no special-casing"
+ * precedent as arena_nearest_ally/arena_nearest_enemy. */
+void arena_tick_nodes(unsigned int dt_ms);
 
 /* Kit casts dispatch on the hero's hero_id, not a hardcoded owner check
  * (S170-31 generalized this from S170-18's Unicorn-only version). No-ops

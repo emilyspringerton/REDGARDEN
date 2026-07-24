@@ -737,6 +737,561 @@ static void test_doc_wheel_r_consumes_cooldown_even_with_zero_allies(void) {
           "No Combat Power consumes its cooldown even when zero allies are in range");
 }
 
+/* S170-46: territory/node system + Tree, Pizza, and merged Flamel (absorbed
+ * former Druid). */
+
+static void test_node_pressure_drifts_toward_team_with_more_presence(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+
+    arena_tick_nodes(1000);
+
+    CHECK(arena_state.nodes[0].pressure > 0.0f,
+          "a node with only team-0 presence in radius drifts pressure positive (team-0-leaning)");
+}
+
+static void test_node_pressure_decays_toward_neutral_when_uncontested(void) {
+    arena_init_teams();
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.nodes[0].pressure = 40.0f;
+
+    arena_tick_nodes(1000);
+
+    CHECK(arena_state.nodes[0].pressure < 40.0f && arena_state.nodes[0].pressure >= 0.0f,
+          "an uncontested node's pressure decays back toward neutral, not stuck");
+}
+
+static void test_node_owner_flips_at_threshold(void) {
+    arena_init_teams();
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+
+    arena_state.nodes[0].pressure = ARENA_NODE_OWNER_THRESHOLD - 1.0f;
+    arena_tick_nodes(0); /* dt=0: recomputes owner from current pressure without drifting it */
+    CHECK(arena_state.nodes[0].owner == 0, "a node just below the threshold is still contested (owner 0)");
+
+    arena_state.nodes[0].pressure = ARENA_NODE_OWNER_THRESHOLD;
+    arena_tick_nodes(0);
+    CHECK(arena_state.nodes[0].owner == 1, "a node at/above the threshold flips to team 0's ownership");
+
+    arena_state.nodes[0].pressure = -ARENA_NODE_OWNER_THRESHOLD;
+    arena_tick_nodes(0);
+    CHECK(arena_state.nodes[0].owner == 2, "a node at/below the negative threshold flips to team 1's ownership");
+}
+
+static void test_tree_capture_weight_offsets_two_non_tree_enemies(void) {
+    /* One Tree (Root Network doubles its weight to 2) vs two ordinary
+       enemy heroes (weight 1 each = 2 total) at the same node -- a tied
+       contest should decay toward neutral, not swing to team 1, proving
+       the doubling actually took effect (without it, this would be a
+       1-vs-2 mismatch that swings negative). */
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE + 1].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE + 1].alive = 1;
+    arena_state.heroes[1].active = 0;
+
+    arena_state.heroes[0].hero_id = ARENA_HERO_TREE;
+    arena_state.heroes[0].x = arena_state.nodes[0].x; arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = arena_state.nodes[0].x;
+    arena_state.heroes[ARENA_TEAM_SIZE].z = arena_state.nodes[0].z;
+    arena_state.heroes[ARENA_TEAM_SIZE + 1].x = arena_state.nodes[0].x;
+    arena_state.heroes[ARENA_TEAM_SIZE + 1].z = arena_state.nodes[0].z;
+
+    arena_tick_nodes(1000);
+
+    CHECK(arena_state.nodes[0].pressure == 0.0f,
+          "Root Network: one Tree's doubled weight ties two non-Tree enemies -- pressure stays neutral");
+}
+
+static void test_flamel_marks_node_and_mark_decays_after_leaving(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_FLAMEL;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+
+    arena_tick_nodes(16);
+    CHECK(arena_state.nodes[0].marked_by_team == 0 && arena_state.nodes[0].mark_ms_remaining == ARENA_FLAMEL_MARK_MS,
+          "Overgrowth: Flamel standing in radius marks the node for his team");
+
+    arena_state.heroes[0].x = 1000.0f; arena_state.heroes[0].z = 1000.0f;
+    arena_tick_nodes(1000);
+    CHECK(arena_state.nodes[0].marked_by_team == 0 && arena_state.nodes[0].mark_ms_remaining < ARENA_FLAMEL_MARK_MS,
+          "the mark decays once Flamel leaves, rather than clearing instantly");
+
+    arena_tick_nodes(ARENA_FLAMEL_MARK_MS);
+    CHECK(arena_state.nodes[0].marked_by_team == -1, "the mark fully clears once its decay window elapses");
+}
+
+static void test_pizza_corruption_pulls_faster_than_baseline_decay(void) {
+    arena_init_teams();
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.nodes[0].pressure = 30.0f;
+    arena_tick_nodes(1000);
+    float baseline_pressure = arena_state.nodes[0].pressure;
+
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_PIZZA;
+    arena_state.heroes[0].x = arena_state.nodes[0].x; arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = arena_state.nodes[0].x;
+    arena_state.heroes[ARENA_TEAM_SIZE].z = arena_state.nodes[0].z;
+    arena_state.nodes[0].pressure = 30.0f;
+    arena_tick_nodes(1000);
+    float pizza_pressure = arena_state.nodes[0].pressure;
+
+    CHECK(pizza_pressure < baseline_pressure,
+          "Uninvestigated Fire: Pizza's corruption pull decays a tied-contest node faster than plain decay alone");
+}
+
+static void test_tree_q_roots_and_damages_in_range(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_TREE;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hero_id = ARENA_HERO_DUCK; /* no armor, so damage isn't reduced */
+    arena_state.heroes[ARENA_TEAM_SIZE].x = ARENA_TREE_Q_RANGE - 1.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 100;
+
+    arena_cast_q(0);
+
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].hp == 100 - ARENA_TREE_Q_DAMAGE,
+          "Vine Lash damages an enemy in range");
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].rooted_ms == ARENA_TREE_Q_ROOT_MS,
+          "Vine Lash roots the enemy it hits");
+}
+
+static void test_tree_q_out_of_range_whiffs(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_TREE;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = ARENA_TREE_Q_RANGE * 3.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+
+    arena_cast_q(0);
+
+    CHECK(arena_state.heroes[0].q_cooldown_ms == 0, "Vine Lash whiffs out of range -- cooldown is not consumed");
+}
+
+static void test_tree_r_self_roots_grants_armor_and_heals(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_TREE;
+    arena_state.heroes[0].hp = 50; arena_state.heroes[0].max_hp = 100;
+
+    arena_cast_r(0);
+
+    CHECK(arena_state.heroes[0].rooted_ms == ARENA_TREE_R_ROOT_MS, "Grand Secret self-roots the Tree");
+    CHECK(arena_state.heroes[0].hp == 50 + ARENA_TREE_R_HEAL, "Grand Secret heals the Tree");
+    CHECK(arena_hero_armor(&arena_state.heroes[0]) == (float)ARENA_TREE_R_ARMOR_BONUS,
+          "Grand Secret grants the armor bonus while active");
+}
+
+static void test_tree_r_makes_immune_to_duck_pull(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_DUCK;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hero_id = ARENA_HERO_TREE;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = 3.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 100;
+    arena_cast_r(ARENA_TEAM_SIZE); /* Tree self-roots first */
+    float rooted_x = arena_state.heroes[ARENA_TEAM_SIZE].x;
+
+    arena_cast_q(0); /* Duck's Telekinetic Yank */
+
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].x == rooted_x,
+          "Grand Secret's self-root makes the Tree immune to Duck's pull -- position unchanged");
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].hp < 100,
+          "the pull is blocked but the Duck's damage still lands");
+}
+
+static void test_pizza_q_damages_and_applies_burn(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_PIZZA;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hero_id = ARENA_HERO_DUCK; /* no armor, so damage isn't reduced */
+    arena_state.heroes[ARENA_TEAM_SIZE].x = ARENA_PIZZA_Q_RANGE - 1.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 100;
+
+    arena_cast_q(0);
+
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].hp == 100 - ARENA_PIZZA_Q_DAMAGE,
+          "Nobody Checked damages an enemy in range");
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].burning_ms == ARENA_PIZZA_Q_BURN_MS,
+          "Nobody Checked applies a burn DoT to the enemy it hits");
+}
+
+static void test_pizza_burn_ticks_damage_over_time(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hp = arena_state.heroes[0].max_hp = 100;
+    arena_state.heroes[0].burning_ms = ARENA_PIZZA_Q_BURN_MS;
+    arena_state.heroes[0].burn_dps = ARENA_PIZZA_Q_BURN_DPS;
+
+    arena_update_teams(1000); /* one full 1000ms burn tick */
+
+    CHECK(arena_state.heroes[0].hp == 100 - ARENA_PIZZA_Q_BURN_DPS,
+          "an active burn deals its DPS once per 1000ms tick");
+}
+
+static void test_pizza_passive_aura_damages_nearby_foe(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_PIZZA;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[0].hp = arena_state.heroes[0].max_hp = 100;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = ARENA_PIZZA_AURA_RADIUS - 0.5f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 100;
+
+    arena_update_teams(1000);
+
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].hp == 100 - ARENA_PIZZA_AURA_DPS,
+          "Uninvestigated Fire's always-on aura damages a nearby enemy without any cast");
+    CHECK(arena_state.heroes[0].hp == arena_state.heroes[0].max_hp,
+          "Pizza is immune to its own burn aura");
+}
+
+static void test_pizza_r_prevents_death_for_duration(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_PIZZA;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[0].hp = 1; arena_state.heroes[0].max_hp = 100; /* one hit from death */
+    arena_state.heroes[ARENA_TEAM_SIZE].hero_id = ARENA_HERO_DUCK;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = ARENA_DUCK_Q_RANGE - 1.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+
+    arena_cast_r(0); /* Nobody Ever Checks */
+    arena_cast_q(ARENA_TEAM_SIZE); /* Duck's Telekinetic Yank, would normally kill a 1-HP target */
+
+    CHECK(arena_state.heroes[0].hp == 1, "the damage floor holds Pizza at 1 HP against lethal damage");
+    CHECK(arena_state.heroes[0].alive, "Pizza survives what would otherwise be a killing blow");
+}
+
+static void test_flamel_q_roots_without_damage(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_FLAMEL;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = ARENA_FLAMEL_Q_RANGE - 1.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 100;
+
+    arena_cast_q(0);
+
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].rooted_ms == ARENA_FLAMEL_Q_ROOT_MS,
+          "Vine Growth roots an enemy in range");
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].hp == 100,
+          "Vine Growth is pure crowd control -- it deals no damage");
+}
+
+static void test_flamel_w_heals_allies_in_radius(void) {
+    arena_init_teams();
+    for (int i = 3; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_FLAMEL;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].x = 1; arena_state.heroes[1].z = 0; /* in radius */
+    arena_state.heroes[1].max_hp = 100; arena_state.heroes[1].hp = 50;
+    arena_state.heroes[2].x = ARENA_FLAMEL_W_RADIUS * 3.0f; arena_state.heroes[2].z = 0; /* out of radius */
+    arena_state.heroes[2].max_hp = 100; arena_state.heroes[2].hp = 50;
+
+    arena_toggle_w(0);
+
+    CHECK(arena_state.heroes[1].hp == 50 + ARENA_FLAMEL_W_HEAL_BASE,
+          "Philosopher's Bloom heals an ally within radius at the base rate");
+    CHECK(arena_state.heroes[2].hp == 50, "Philosopher's Bloom does not reach an ally outside radius");
+}
+
+static void test_flamel_w_heals_more_on_marked_ground(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_FLAMEL;
+    arena_state.heroes[0].x = arena_state.nodes[0].x; arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.heroes[1].x = arena_state.nodes[0].x + 1.0f; arena_state.heroes[1].z = arena_state.nodes[0].z;
+    arena_state.heroes[1].max_hp = 100; arena_state.heroes[1].hp = 50;
+    arena_state.nodes[0].marked_by_team = arena_state.heroes[0].team; /* pre-marked, as if Flamel had stood here already */
+
+    arena_toggle_w(0);
+
+    CHECK(arena_state.heroes[1].hp == 50 + ARENA_FLAMEL_W_HEAL_MARKED,
+          "Philosopher's Bloom heals for more when cast on Flamel's own marked ground");
+}
+
+static void test_flamel_r_roots_enemies_and_heals_allies_in_zone(void) {
+    arena_init_teams();
+    for (int i = 3; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[0].hero_id = ARENA_HERO_FLAMEL;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].x = 1; arena_state.heroes[1].z = 0; /* ally, inside the zone */
+    arena_state.heroes[1].max_hp = 100; arena_state.heroes[1].hp = 50;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = -1; arena_state.heroes[ARENA_TEAM_SIZE].z = 0; /* enemy, inside the zone */
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 100;
+
+    arena_cast_r(0);
+    arena_update_teams(1000); /* one full 1000ms zone tick */
+
+    CHECK(arena_state.heroes[1].hp == 50 + ARENA_FLAMEL_R_HEAL_PER_TICK,
+          "Elixir of Wild Growth heals an ally standing in the zone");
+    /* > 0, not an exact value: the root is applied mid-loop (hero 0's
+       iteration) and then generically decremented by the same dt_ms during
+       the target's OWN iteration later in the same arena_update_teams
+       call -- an artifact of iteration order within one tick, same
+       reasoning as why other status effects are asserted right after a
+       standalone cast rather than after a full update tick. */
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].rooted_ms > 0,
+          "Elixir of Wild Growth roots an enemy standing in the zone");
+}
+
+static void test_flamel_r_mass_marks_nodes_in_radius(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_FLAMEL;
+    arena_state.heroes[0].x = arena_state.nodes[0].x; arena_state.heroes[0].z = arena_state.nodes[0].z;
+
+    arena_cast_r(0);
+
+    CHECK(arena_state.nodes[0].marked_by_team == arena_state.heroes[0].team,
+          "Elixir of Wild Growth mass-marks nodes within radius at cast time");
+}
+
+static void test_rooted_hero_cannot_move(void) {
+    arena_init();
+    arena_state.heroes[0].rooted_ms = 1000;
+    arena_set_move_target(0, 5.0f, 5.0f);
+    float x0 = arena_state.heroes[0].x, z0 = arena_state.heroes[0].z;
+
+    arena_update(16);
+
+    CHECK(arena_state.heroes[0].x == x0 && arena_state.heroes[0].z == z0,
+          "a rooted hero does not move even with a move command queued");
+}
+
+/* S170-47: Morrigan (TYLER #68) and Dagda (TYLER #69). */
+
+static void test_morrigan_passive_grants_armor_on_contested_node(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_MORRIGAN;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.nodes[0].owner = 0; /* contested */
+
+    CHECK(arena_hero_armor(&arena_state.heroes[0]) == (float)ARENA_MORRIGAN_PASSIVE_ARMOR_BONUS,
+          "Contested Ground grants armor while standing on a contested node");
+
+    arena_state.nodes[0].owner = 1; /* claimed by a team -- no longer contested */
+    CHECK(arena_hero_armor(&arena_state.heroes[0]) == 0.0f,
+          "Contested Ground grants no armor once the node is claimed");
+}
+
+static void test_morrigan_q_executes_harder_at_low_hp(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_MORRIGAN;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hero_id = ARENA_HERO_DUCK; /* no armor */
+    arena_state.heroes[ARENA_TEAM_SIZE].x = ARENA_MORRIGAN_Q_RANGE - 1.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 100;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = 95; /* near-full */
+
+    arena_cast_q(0);
+    int dmg_near_full = 95 - arena_state.heroes[ARENA_TEAM_SIZE].hp;
+
+    arena_state.heroes[0].q_cooldown_ms = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = 10; /* near-empty */
+    arena_cast_q(0);
+    int dmg_near_empty = 10 - arena_state.heroes[ARENA_TEAM_SIZE].hp;
+
+    CHECK(dmg_near_empty > dmg_near_full,
+          "The Washer's Strike deals more damage the lower the target's current HP%% is");
+}
+
+static void test_morrigan_w_teleports_and_roots_nearest_enemy(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_MORRIGAN;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = 9.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = -4.0f;
+
+    arena_toggle_w(0);
+
+    CHECK(arena_state.heroes[0].x == 9.0f && arena_state.heroes[0].z == -4.0f,
+          "Three Forms teleports Morrigan to the nearest enemy's exact position");
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].rooted_ms == ARENA_MORRIGAN_W_ROOT_MS,
+          "Three Forms roots the enemy on arrival");
+}
+
+static void test_morrigan_r_zone_executes_harder_at_low_hp(void) {
+    /* Enemy positioned inside the R radius but outside melee attack range,
+       so the zone tick's own damage isn't confounded by an auto-attack
+       landing in the same update. Two separate setups (near-full vs
+       near-empty target HP), comparing the tick's damage delta rather than
+       an absolute post-tick HP -- same pattern as the Q execute test,
+       avoiding HP-floor clamping at 0 for the near-empty case. */
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_MORRIGAN;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hero_id = ARENA_HERO_DUCK;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = ARENA_MORRIGAN_R_RADIUS - 1.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 1000;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = 950; /* near-full */
+
+    arena_cast_r(0);
+    arena_update_teams(1000);
+    int dmg_near_full = 950 - arena_state.heroes[ARENA_TEAM_SIZE].hp;
+
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_MORRIGAN;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hero_id = ARENA_HERO_DUCK;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = ARENA_MORRIGAN_R_RADIUS - 1.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 1000;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = 50; /* near-empty */
+
+    arena_cast_r(0);
+    arena_update_teams(1000);
+    int dmg_near_empty = 50 - arena_state.heroes[ARENA_TEAM_SIZE].hp;
+
+    CHECK(dmg_near_empty > dmg_near_full,
+          "The Crow Confirms It ticks harder against a near-dead enemy standing in the zone");
+}
+
+static void test_dagda_passive_regenerates_hp(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_DAGDA;
+    arena_state.heroes[0].max_hp = 100;
+    arena_state.heroes[0].hp = 50;
+
+    arena_update_teams(1000);
+
+    CHECK(arena_state.heroes[0].hp == 50 + ARENA_DAGDA_PASSIVE_REGEN_PER_SEC,
+          "The Undry passively regenerates HP every tick with no cast at all");
+}
+
+static void test_dagda_q_kills_when_enemy_in_range(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_DAGDA;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hero_id = ARENA_HERO_DUCK;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = ARENA_DAGDA_Q_RANGE - 1.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 100;
+
+    arena_cast_q(0);
+
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].hp == 100 - ARENA_DAGDA_Q_KILL_DAMAGE,
+          "the club's killing end damages an enemy in range");
+}
+
+static void test_dagda_q_revives_when_only_hurt_ally_in_range(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_DAGDA;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].x = 1; arena_state.heroes[1].z = 0;
+    arena_state.heroes[1].max_hp = 100; arena_state.heroes[1].hp = 50;
+
+    arena_cast_q(0);
+
+    CHECK(arena_state.heroes[1].hp == 50 + ARENA_DAGDA_Q_REVIVE_HEAL,
+          "the club's reviving end heals a hurt ally when no enemy is in range");
+}
+
+static void test_dagda_w_heals_allies_and_cc_enemies_at_once(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[0].hero_id = ARENA_HERO_DAGDA;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].x = 1; arena_state.heroes[1].z = 0; /* ally, in radius */
+    arena_state.heroes[1].max_hp = 100; arena_state.heroes[1].hp = 50;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = -1; arena_state.heroes[ARENA_TEAM_SIZE].z = 0; /* enemy, in radius */
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 100;
+
+    arena_toggle_w(0);
+
+    CHECK(arena_state.heroes[1].hp == 50 + ARENA_DAGDA_W_ALLY_HEAL,
+          "Uaithne's joy strain heals an ally in radius");
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].rooted_ms == ARENA_DAGDA_W_ROOT_MS,
+          "Uaithne's sorrow strain roots an enemy in radius");
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].silenced_ms == ARENA_DAGDA_W_SILENCE_MS,
+          "Uaithne's sleep strain silences an enemy in radius, in the same cast");
+}
+
+static void test_dagda_r_floor_and_heal(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_DAGDA;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[0].max_hp = 100; arena_state.heroes[0].hp = 1; /* one hit from death */
+    arena_state.heroes[ARENA_TEAM_SIZE].hero_id = ARENA_HERO_DUCK;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = 1.0f; arena_state.heroes[ARENA_TEAM_SIZE].z = 0; /* melee range */
+
+    arena_cast_r(0); /* the porridge: floor + heal */
+    CHECK(arena_state.heroes[0].hp == 1 + ARENA_DAGDA_R_HEAL,
+          "the porridge heals Dagda for real, not just holding him at a floor");
+
+    /* Repeated melee auto-attacks, well within the 3000ms floor window,
+       dealing far more cumulative damage than the healed HP total -- would
+       be lethal without the floor. */
+    for (int i = 0; i < 180; i++) arena_update_teams(16); /* ~2880ms */
+
+    CHECK(arena_state.heroes[0].alive && arena_state.heroes[0].hp == 1,
+          "the damage floor holds Dagda at 1 HP against repeated attacks that would otherwise be lethal");
+}
+
 int main(void) {
     printf("RED GARDEN arena_game headless smoke test\n\n");
     test_movement_reaches_target();
@@ -786,6 +1341,35 @@ int main(void) {
     test_doc_wheel_w_teleports_to_ally();
     test_doc_wheel_r_heals_allies_in_radius_only();
     test_doc_wheel_r_consumes_cooldown_even_with_zero_allies();
+    test_node_pressure_drifts_toward_team_with_more_presence();
+    test_node_pressure_decays_toward_neutral_when_uncontested();
+    test_node_owner_flips_at_threshold();
+    test_tree_capture_weight_offsets_two_non_tree_enemies();
+    test_flamel_marks_node_and_mark_decays_after_leaving();
+    test_pizza_corruption_pulls_faster_than_baseline_decay();
+    test_tree_q_roots_and_damages_in_range();
+    test_tree_q_out_of_range_whiffs();
+    test_tree_r_self_roots_grants_armor_and_heals();
+    test_tree_r_makes_immune_to_duck_pull();
+    test_pizza_q_damages_and_applies_burn();
+    test_pizza_burn_ticks_damage_over_time();
+    test_pizza_passive_aura_damages_nearby_foe();
+    test_pizza_r_prevents_death_for_duration();
+    test_flamel_q_roots_without_damage();
+    test_flamel_w_heals_allies_in_radius();
+    test_flamel_w_heals_more_on_marked_ground();
+    test_flamel_r_roots_enemies_and_heals_allies_in_zone();
+    test_flamel_r_mass_marks_nodes_in_radius();
+    test_rooted_hero_cannot_move();
+    test_morrigan_passive_grants_armor_on_contested_node();
+    test_morrigan_q_executes_harder_at_low_hp();
+    test_morrigan_w_teleports_and_roots_nearest_enemy();
+    test_morrigan_r_zone_executes_harder_at_low_hp();
+    test_dagda_passive_regenerates_hp();
+    test_dagda_q_kills_when_enemy_in_range();
+    test_dagda_q_revives_when_only_hurt_ally_in_range();
+    test_dagda_w_heals_allies_and_cc_enemies_at_once();
+    test_dagda_r_floor_and_heal();
     printf("\n%s\n", failures == 0 ? "ALL PASS" : "SOME FAILED");
     return failures == 0 ? 0 : 1;
 }

@@ -367,7 +367,7 @@ static void server_handle_packet(struct sockaddr_in *sender, char *buffer, int s
         if (match_phase != ARENA_PHASE_DRAFT) return; // picks only mean anything during draft
         if (size < (int)(sizeof(NetHeader) + sizeof(ArenaPickCmd))) return;
         ArenaPickCmd *cmd = (ArenaPickCmd *)(buffer + sizeof(NetHeader));
-        if (cmd->hero_id > ARENA_HERO_DOC_WHEEL) return; // reject anything outside the real roster
+        if (cmd->hero_id > ARENA_HERO_DAGDA) return; // reject anything outside the real roster
         if (!hero_picked[client_id]) picked_count++;
         hero_pick[client_id] = cmd->hero_id;
         hero_picked[client_id] = 1;

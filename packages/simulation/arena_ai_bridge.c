@@ -11,6 +11,11 @@ const char *arena_hero_name(ArenaHeroID hero_id) {
     case ARENA_HERO_GHOST:   return "ghost";
     case ARENA_HERO_FROG:    return "frog";
     case ARENA_HERO_DOC_WHEEL: return "doc_wheel";
+    case ARENA_HERO_TREE:    return "tree";
+    case ARENA_HERO_PIZZA:   return "pizza";
+    case ARENA_HERO_FLAMEL:  return "flamel";
+    case ARENA_HERO_MORRIGAN: return "morrigan";
+    case ARENA_HERO_DAGDA:   return "dagda";
     default:                 return "unknown";
     }
 }

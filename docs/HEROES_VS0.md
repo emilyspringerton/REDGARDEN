@@ -174,44 +174,80 @@ unforgiving) "OG" clone-death rule, reskinned as TYLER rather than renamed into 
   requested**: all clones share a single pool of fate — if any one TYLER dies, every TYLER dies,
   no exceptions. High-risk, high-reward, exactly like the original.
 
-### Flamel — **Support — Master Cook**
+### Flamel — **Support — Alchemist-Gardener** (merged with the former "Druid" entry, 2026-07-24)
 
 Nicolas Flamel, already in `TYLER/multiverse_heroes.md`'s roster of reframed real historical
-figures, added here as the roster's first hero whose entire kit is the cooking system
-(`docs/CONSUMABLES_AND_COOKING.md`) made literal — not a support who happens to also cook,
-a cook whose support comes from cooking.
+figures. Founder direction: Druid and Flamel should be the same hero, not two separate roster
+slots — the generic "Druid" archetype below was never actually a named TYLER lore character (no
+entry for it in `multiverse_heroes.md`), while Flamel is; consolidating a nameless archetype into
+an already-established named figure rather than carrying two adjacent support/growth heroes.
+Flamel keeps his name and his lore ("The Great Work" is the real historical term for the
+alchemical magnum opus, and reads naturally as *cultivation*, not just cooking); Druid's kit
+supplies the actual moveset, since it was the more self-contained and less economy-blocked of the
+two (three of its four pieces need no cooking/resource economy at all — only Q needed nothing
+extra, and the old Flamel kit was entirely ally/economy-dependent with no self-contained piece).
+The result: Flamel is the roster's first hero whose entire kit is the territory/growth system
+made literal, not the cooking system — cooking (`docs/CONSUMABLES_AND_COOKING.md`) stays a
+future, separate economy layer this kit doesn't require to function.
 
-- **Passive — The Great Work**: Flamel's cooked consumables are stronger and cheaper when he
-  personally prepares them versus anyone else using the same station — alchemy, not recipe-
-  following.
-- **Q — Transmutation**: Converts one held raw resource into a different raw resource type
-  (Orange → any other base ingredient), at a conversion cost — lets the team route around a
-  contested node instead of being locked out of a recipe by it.
-- **W — Philosopher's Batch**: Cooks a consumable for every nearby ally at once, instead of one
-  at a time — the kit's actual throughput advantage over any other hero cooking manually.
-- **R — Elixir of Life**: A single powerful team-wide consumable, cooked once per game (long
-  cooldown, no raw-resource cost) — the "master" part of master cook, reserved for exactly the
-  moment a team decides to commit.
+- **Passive — The Great Work**: Flamel's presence marks the ground he crosses (folded in from
+  Druid's Overgrowth) — a marked cell that's still `NEUTRAL` at tick's end has an increased
+  chance of converting toward his side. Cooked consumables prepared on his own marked ground are
+  stronger and cheaper than the same recipe prepared elsewhere — alchemy is literally cultivation
+  here, not recipe-following.
+- **Q — Vine Growth** (from Druid, self-contained — no ally or economy needed): grows a temporary
+  wall of vines in a line, rooting anything caught in it; decays after a few seconds.
+- **W — Philosopher's Bloom** (Druid's Bloom + Flamel's Philosopher's Batch, merged): heals every
+  nearby ally at once instead of one at a time, healing for more if cast on ground Flamel has
+  marked — rewards playing on your own seeded plot.
+- **R — Elixir of Wild Growth** (Flamel's Elixir framing, Druid's Wild Growth shape): a single
+  powerful team-wide cast, cooked/grown once per game (long cooldown) — a large area rapidly
+  overgrows, heavy-slowing enemies caught in it, healing-over-time to allies standing in it, and
+  marking every cell inside simultaneously. The "master" part of master cook/gardener, reserved
+  for exactly the moment a team decides to commit.
 
-### Druid — **Fighter/Support — Tree-Growy, RED GARDEN passive**
+### The Morrigan (TYLER `multiverse_heroes.md` #68) — **Assassin/Duelist — meta jungler**
 
-A nature-growth archetype distinct from The Tree (which is static and already planted) — the
-Druid moves, and brings growth with it, fitting a Highlands-style setting (nature terrain,
-LoL's own Summoner's Rift register) rather than The Tree's single-fixed-position gimmick.
+Built to resolve this doc's own earlier "flagged, not built" note below: the founder-observed
+Morrigan/Flamel (formerly Druid) relationship — a shared Highland-Court territory tie with real
+rock-paper-scissors counter-play (her war/death kit against Flamel's life/growth kit) — realized
+directly through the territory/node system both heroes now hook into. Founder direction called her
+a "meta jungler": with no standalone jungle-camp system in this arena yet, her jungler identity is
+expressed as an affinity for *contested* ground rather than claimed territory — she belongs to the
+unresolved fight, not the settled one.
 
-- **Passive — Overgrowth**: Cells the Druid walks across gain a temporary growth marker; a marked
-  cell that ends a tick still `NEUTRAL` has an increased chance of converting toward whoever
-  marked it — the Druid seeds conversions across a wider area than The Tree's single standing
-  spot, at the cost of not holding any one of them as reliably.
-- **Q — Vine Growth**: Grows a temporary wall of vines in a line — blocks movement/vision, decays
-  after a few seconds (grows, not summons — consistent with the "tree-growy" framing over a
-  generic wall spell).
-- **W — Bloom**: Heals an ally and, if cast on a cell the Druid has marked (see passive), heals for
-  more — rewards playing on your own seeded ground.
-- **R — Wild Growth**: A large area rapidly overgrows — heavy slow to enemies caught in it, minor
-  heal-over-time to allies, and every cell inside gets an Overgrowth marker simultaneously. The
-  Druid's answer to a fixed teamfight, matching The Tree's area-control role without copying its
-  stand-still identity.
+- **Passive — Contested Ground**: gains bonus armor while standing on a node that's still
+  contested (neither team has claimed it) — she's drawn to ground that hasn't picked a side yet.
+- **Q — The Washer's Strike**: a ranged strike that hits harder the lower the target's current HP
+  is — an execute, not flat damage; "the crow confirms the kill" the closer death already is.
+- **W — Three Forms** (the eel underfoot, the wolf stampeding cattle, the hornless heifer leading
+  it): closes distance instantly onto the nearest enemy and roots them on arrival — she appears
+  where he doesn't expect, in another shape entirely.
+- **R — The Crow Confirms It**: a fixed battlefield zone that ticks execute-scaled damage to any
+  enemy standing in it for its duration — the lower an enemy's HP drops inside the zone, the harder
+  each following tick lands. No ally-support side, unlike Ghost/Flamel's R zones — a war goddess's
+  ultimate isn't a support tool.
+
+### The Dagda (TYLER `multiverse_heroes.md` #69) — **Bruiser/Support — two-natured**
+
+"The wheeled club settles every argument twice" — one end kills, the other revives, same tool,
+depending only on which end swings first. Paired with the Morrigan in the lore (the one alliance
+in TYLER's roster "both parties remember happening and neither one explains") and built alongside
+her here.
+
+- **Passive — The Undry**: the cauldron that never runs empty — passive, always-on HP regeneration,
+  no cast required. "No one leaves it unsatisfied."
+- **Q — The Wheeled Club**: literally two-natured, exactly as the lore describes — swings the
+  killing end at a hittable enemy in range if one's there; otherwise swings the reviving end,
+  healing a hurt living ally in range instead. Simplified from a literal revive (no respawn system
+  exists in this arena to revive a dead ally into) to a strong heal — the same tool, either
+  direction, depending only on what's actually in range when it swings.
+- **W — Uaithne, Called By Name**: the harp's three master strains — sorrow, joy, and sleep —
+  played over the whole hall in one go, exactly as in the myth. One AoE cast: allies in range get
+  joy (healed), hittable enemies in range get sorrow and sleep at once (rooted and silenced).
+- **R — The Porridge**: force-fed enough to kill an ordinary man, eaten unhurt, then still fighting
+  the next day regardless — a real damage floor (HP cannot drop below 1 for the duration) plus a
+  real heal on top, not just survival. Enduring **and** coming out ahead.
 
 ---
 
@@ -246,9 +282,8 @@ Mixed in, not copy-pasted 1:1.
 - No card-hand integration decided yet: whether heroes replace or sit alongside the existing
   4-card roster (Militia/Scout/Swarmlings/Outpost) is a separate design question.
 - Remaining compendium entries beyond this queue are out of scope for this pass.
-- **Flagged, not built**: founder noted a potential Morrigan/Druid relationship (both Highland-
-  Court-flavored per `TYLER/multiverse_heroes.md`'s Faction 6) that's deliberately both — a good
-  ally pairing in some lines (shared Highland-Court territory control) and real rock-paper-
-  scissors counter-play in others (the Morrigan's war/death kit against the Druid's life/growth
-  kit), not a strictly-synergy or strictly-counter relationship either way. No Morrigan kit
-  written yet — this is a hook for the next hero pass, not a commitment made here.
+- **Built (2026-07-24, S170-47)**: the Morrigan/Druid relationship flagged in the previous version
+  of this note is now realized — Druid merged into Flamel (see the Flamel entry above), and the
+  Morrigan built alongside the Dagda, both hooking into the territory/node system so the
+  rock-paper-scissors counter-play (Morrigan's war/death kit vs. Flamel's life/growth kit) is real,
+  not just a design intention.

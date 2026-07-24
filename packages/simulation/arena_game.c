@@ -85,6 +85,8 @@ void arena_init_with_heroes(ArenaHeroID player_hero, ArenaHeroID bot_hero) {
     arena_state.nodes[0].z = 4.0f;
     arena_state.nodes[1].x = 4.0f;
     arena_state.nodes[1].z = -4.0f;
+    arena_state.nodes[0].marked_by_team = -1;
+    arena_state.nodes[1].marked_by_team = -1;
 
     arena_state.winner = 0;
 }
@@ -133,7 +135,10 @@ void arena_bot_tick(unsigned int dt_ms) {
 }
 
 static void update_hero_motion(ArenaHero *h, float dt_sec) {
-    if (!h->alive || !h->moving) return;
+    /* rooted_ms (S170-46): a queued move command is preserved (not
+       cancelled) but doesn't advance while rooted -- matches how silence
+       blocks casting without clearing the ability off cooldown. */
+    if (!h->alive || !h->moving || h->rooted_ms > 0) return;
     float dx = h->target_x - h->x;
     float dz = h->target_z - h->z;
     float dist = sqrtf(dx * dx + dz * dz);
@@ -157,15 +162,53 @@ static void update_hero_motion(ArenaHero *h, float dt_sec) {
  * has none -- dispatch is by hero_id now, not by owner slot, so either side
  * gets Unicorn's armor if either side is playing Unicorn. */
 float arena_hero_armor(const ArenaHero *h) {
-    if (h->hero_id != ARENA_HERO_UNICORN) return 0.0f;
-    float armor = (float)ARENA_UNICORN_ARMOR;
-    if (h->r_active_ms > 0) armor *= 2.0f;
-    return armor;
+    if (h->hero_id == ARENA_HERO_UNICORN) {
+        float armor = (float)ARENA_UNICORN_ARMOR;
+        if (h->r_active_ms > 0) armor *= 2.0f;
+        return armor;
+    }
+    /* Tree's Grand Secret (R, S170-46): flat armor bonus while self-rooted. */
+    if (h->hero_id == ARENA_HERO_TREE && h->r_active_ms > 0) {
+        return (float)ARENA_TREE_R_ARMOR_BONUS;
+    }
+    /* Morrigan's Contested Ground (passive, S170-47): bonus armor while
+       standing within capture radius of a node that's still contested
+       (owner == 0, neither team has claimed it) -- a war goddess belongs
+       to the unresolved fight, her jungler tie to the territory system. */
+    if (h->hero_id == ARENA_HERO_MORRIGAN) {
+        for (int n = 0; n < ARENA_NODE_COUNT; n++) {
+            const ArenaNode *node = &arena_state.nodes[n];
+            if (node->owner != 0) continue;
+            float dx = h->x - node->x, dz = h->z - node->z;
+            if (sqrtf(dx * dx + dz * dz) <= ARENA_NODE_CAPTURE_RADIUS) {
+                return (float)ARENA_MORRIGAN_PASSIVE_ARMOR_BONUS;
+            }
+        }
+    }
+    return 0.0f;
 }
 
 static int apply_armor(int raw_damage, float armor) {
     int dmg = raw_damage - (int)armor;
     return dmg < 1 ? 1 : dmg;
+}
+
+/* apply_damage (S170-46): centralizes "subtract HP, clamp at 0, mark dead"
+ * across every damage call site, so Pizza's R (a real damage floor, not a
+ * simplified-away shield like Doc Wheel's) only needs one place to check
+ * survive_floor_ms rather than duplicating the check at every site. Armor
+ * is already applied by the caller via apply_armor -- this only handles the
+ * HP-floor/death half. */
+static void apply_damage(ArenaHero *target, int amount) {
+    target->hp -= amount;
+    if (target->hp <= 0) {
+        if (target->survive_floor_ms > 0) {
+            target->hp = 1;
+        } else {
+            target->hp = 0;
+            target->alive = 0;
+        }
+    }
 }
 
 /* arena_nearest_enemy: the nearest active, living hero on a different team
@@ -214,6 +257,89 @@ ArenaHero *arena_nearest_ally(int owner) {
     return best;
 }
 
+/* arena_tick_nodes (S170-46): advances every ArenaNode's capture contest by
+ * dt_ms. One pass per node: sum weighted living-hero presence per team
+ * within ARENA_NODE_CAPTURE_RADIUS (Tree counts double, Root Network),
+ * refresh/decay Flamel's Overgrowth mark, drift pressure toward whichever
+ * team is ahead (or decay toward neutral if tied/uncontested), apply a
+ * bonus pull on a marked-but-still-neutral node toward the marking team
+ * (deterministic simplification of "increased chance of converting",
+ * flagged), apply Pizza's corruption pull toward neutral regardless of team
+ * composition (simplification of the doc's 4-state CORRUPTED concept,
+ * flagged), then clamp and recompute owner from the threshold. Generalizes
+ * across 1v1 and team mode with no special-casing, same as
+ * arena_nearest_ally/arena_nearest_enemy -- 1v1 already sets team=0/1 on
+ * its two hardcoded heroes. */
+void arena_tick_nodes(unsigned int dt_ms) {
+    float dt_sec = (float)dt_ms / 1000.0f;
+
+    for (int n = 0; n < ARENA_NODE_COUNT; n++) {
+        ArenaNode *node = &arena_state.nodes[n];
+        int old_owner = node->owner; /* "still neutral" gate for the marked-node bonus pull, below */
+        float team_weight[2] = {0.0f, 0.0f};
+        int pizza_in_radius = 0;
+        int flamel_marker_team = -1;
+
+        for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+            ArenaHero *h = &arena_state.heroes[i];
+            if (!h->active || !h->alive) continue;
+            float dx = h->x - node->x, dz = h->z - node->z;
+            if (sqrtf(dx * dx + dz * dz) > ARENA_NODE_CAPTURE_RADIUS) continue;
+            int weight = (h->hero_id == ARENA_HERO_TREE) ? ARENA_TREE_CAPTURE_WEIGHT : 1;
+            team_weight[h->team] += (float)weight;
+            if (h->hero_id == ARENA_HERO_PIZZA) pizza_in_radius = 1;
+            if (h->hero_id == ARENA_HERO_FLAMEL) flamel_marker_team = h->team;
+        }
+
+        if (flamel_marker_team >= 0) {
+            node->marked_by_team = flamel_marker_team;
+            node->mark_ms_remaining = ARENA_FLAMEL_MARK_MS;
+        } else if (node->mark_ms_remaining > 0) {
+            node->mark_ms_remaining -= (int)dt_ms;
+            if (node->mark_ms_remaining <= 0) {
+                node->mark_ms_remaining = 0;
+                node->marked_by_team = -1;
+            }
+        }
+
+        float diff = team_weight[0] - team_weight[1];
+        if (diff > 0.0f) {
+            node->pressure += ARENA_NODE_PRESSURE_RATE * dt_sec;
+        } else if (diff < 0.0f) {
+            node->pressure -= ARENA_NODE_PRESSURE_RATE * dt_sec;
+        } else if (node->pressure > 0.0f) {
+            node->pressure -= ARENA_NODE_DECAY_RATE * dt_sec;
+            if (node->pressure < 0.0f) node->pressure = 0.0f;
+        } else if (node->pressure < 0.0f) {
+            node->pressure += ARENA_NODE_DECAY_RATE * dt_sec;
+            if (node->pressure > 0.0f) node->pressure = 0.0f;
+        }
+
+        if (old_owner == 0 && node->marked_by_team == 0) {
+            node->pressure += ARENA_FLAMEL_MARK_BONUS_RATE * dt_sec;
+        } else if (old_owner == 0 && node->marked_by_team == 1) {
+            node->pressure -= ARENA_FLAMEL_MARK_BONUS_RATE * dt_sec;
+        }
+
+        if (pizza_in_radius) {
+            if (node->pressure > 0.0f) {
+                node->pressure -= ARENA_PIZZA_CORRUPT_PULL_RATE * dt_sec;
+                if (node->pressure < 0.0f) node->pressure = 0.0f;
+            } else if (node->pressure < 0.0f) {
+                node->pressure += ARENA_PIZZA_CORRUPT_PULL_RATE * dt_sec;
+                if (node->pressure > 0.0f) node->pressure = 0.0f;
+            }
+        }
+
+        if (node->pressure > 100.0f) node->pressure = 100.0f;
+        if (node->pressure < -100.0f) node->pressure = -100.0f;
+
+        if (node->pressure >= ARENA_NODE_OWNER_THRESHOLD) node->owner = 1;
+        else if (node->pressure <= -ARENA_NODE_OWNER_THRESHOLD) node->owner = 2;
+        else node->owner = 0;
+    }
+}
+
 /* cast_cooldown: applies the generic next_cast_refund buff (S170-45,
  * Frog's Borrowed Time) -- returns 0 and consumes the buff if it's set on
  * h, else returns normal_ms unchanged. Every Q/W/R cooldown-assignment
@@ -251,15 +377,13 @@ static void resolve_combat(unsigned int dt_ms) {
     if (dist > ARENA_ATTACK_RANGE) return;
 
     if (a->attack_cooldown_ms <= 0) {
-        if (hero_is_hittable(b)) b->hp -= apply_armor(ARENA_ATTACK_DAMAGE, arena_hero_armor(b));
+        if (hero_is_hittable(b)) apply_damage(b, apply_armor(ARENA_ATTACK_DAMAGE, arena_hero_armor(b)));
         a->attack_cooldown_ms = ARENA_ATTACK_COOLDOWN_MS;
     }
     if (b->attack_cooldown_ms <= 0) {
-        if (hero_is_hittable(a)) a->hp -= apply_armor(ARENA_ATTACK_DAMAGE, arena_hero_armor(a));
+        if (hero_is_hittable(a)) apply_damage(a, apply_armor(ARENA_ATTACK_DAMAGE, arena_hero_armor(a)));
         b->attack_cooldown_ms = ARENA_ATTACK_COOLDOWN_MS;
     }
-    if (a->hp <= 0) { a->hp = 0; a->alive = 0; }
-    if (b->hp <= 0) { b->hp = 0; b->alive = 0; }
 }
 
 /* --- Kit dispatch (S170-31 generalized this from S170-18's Unicorn-only,
@@ -300,8 +424,7 @@ static void unicorn_cast_q(ArenaHero *h, ArenaHero *foe) {
     if (foe && hero_is_hittable(foe)) {
         float fdx = foe->x - h->x, fdz = foe->z - h->z;
         if (sqrtf(fdx * fdx + fdz * fdz) <= ARENA_UNICORN_Q_HIT_RADIUS) {
-            foe->hp -= apply_armor(ARENA_UNICORN_Q_DAMAGE, arena_hero_armor(foe));
-            if (foe->hp <= 0) { foe->hp = 0; foe->alive = 0; }
+            apply_damage(foe, apply_armor(ARENA_UNICORN_Q_DAMAGE, arena_hero_armor(foe)));
         }
     }
     h->q_cooldown_ms = cast_cooldown(h, ARENA_UNICORN_Q_COOLDOWN_MS);
@@ -319,13 +442,15 @@ static int duck_pull_foe(ArenaHero *duck, ArenaHero *foe, float pull_dist, int d
     float dz = duck->z - foe->z;
     float dist = sqrtf(dx * dx + dz * dz);
     if (dist > max_range) return 0; /* out of range -- no whiff-damage, no partial pull */
-    if (dist > 0.01f) {
+    /* rooted_ms (S170-46): Tree's Grand Secret is "immune to displacement" --
+       the pull is skipped but damage still lands, same as any other root not
+       blocking incoming damage. */
+    if (dist > 0.01f && foe->rooted_ms <= 0) {
         float pull = pull_dist < dist ? pull_dist : dist; /* never pull the foe past the Duck */
         foe->x += dx / dist * pull;
         foe->z += dz / dist * pull;
     }
-    foe->hp -= apply_armor(damage, arena_hero_armor(foe));
-    if (foe->hp <= 0) { foe->hp = 0; foe->alive = 0; }
+    apply_damage(foe, apply_armor(damage, arena_hero_armor(foe)));
     return 1;
 }
 
@@ -339,8 +464,7 @@ static int ghost_cast_q(ArenaHero *ghost, ArenaHero *foe) {
     if (!hero_is_hittable(foe)) return 0;
     float dx = foe->x - ghost->x, dz = foe->z - ghost->z;
     if (sqrtf(dx * dx + dz * dz) > ARENA_GHOST_Q_RANGE) return 0;
-    foe->hp -= apply_armor(ARENA_GHOST_Q_DAMAGE, arena_hero_armor(foe));
-    if (foe->hp <= 0) { foe->hp = 0; foe->alive = 0; }
+    apply_damage(foe, apply_armor(ARENA_GHOST_Q_DAMAGE, arena_hero_armor(foe)));
     foe->silenced_ms = ARENA_GHOST_Q_SILENCE_MS;
     return 1;
 }
@@ -383,6 +507,159 @@ static void doc_wheel_heal_and_cleanse(ArenaHero *target, int amount) {
     target->silenced_ms = 0; /* Bedside Manner: "cleanses one debuff" -- the only debuff arena has today */
 }
 
+/* tree_cast_q: Vine Lash, simplified from "AoE root in a cone in front" to
+ * an instant hit-if-in-range check, same precedent as Ghost's Alien
+ * Frequency. Returns 1 if it landed (cooldown only consumed on a hit), 0 on
+ * a whiff. */
+static int tree_cast_q(ArenaHero *tree, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return 0;
+    float dx = foe->x - tree->x, dz = foe->z - tree->z;
+    if (sqrtf(dx * dx + dz * dz) > ARENA_TREE_Q_RANGE) return 0;
+    apply_damage(foe, apply_armor(ARENA_TREE_Q_DAMAGE, arena_hero_armor(foe)));
+    foe->rooted_ms = ARENA_TREE_Q_ROOT_MS;
+    return 1;
+}
+
+/* pizza_cast_q: Nobody Checked, simplified from "throw a burning slice +
+ * ground patch" to direct damage + a burn DoT applied straight to the foe --
+ * no persistent ground-hazard system exists in this arena, so the
+ * lingering-patch half is dropped, not faked. Returns 1 if it landed, 0 on
+ * a whiff. */
+static int pizza_cast_q(ArenaHero *pizza, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return 0;
+    float dx = foe->x - pizza->x, dz = foe->z - pizza->z;
+    if (sqrtf(dx * dx + dz * dz) > ARENA_PIZZA_Q_RANGE) return 0;
+    apply_damage(foe, apply_armor(ARENA_PIZZA_Q_DAMAGE, arena_hero_armor(foe)));
+    foe->burning_ms = ARENA_PIZZA_Q_BURN_MS;
+    foe->burn_dps = ARENA_PIZZA_Q_BURN_DPS;
+    return 1;
+}
+
+/* flamel_cast_q: Vine Growth (absorbed from the former Druid), simplified
+ * from "wall of vines in a line" to an instant root-if-in-range check on
+ * the nearest enemy -- same cone/line-to-single-target simplification as
+ * Tree's Q. Pure crowd control, no damage, matching the doc's own ability
+ * (blocks movement, nothing else). Returns 1 if it landed, 0 on a whiff. */
+static int flamel_cast_q(ArenaHero *flamel, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return 0;
+    float dx = foe->x - flamel->x, dz = foe->z - flamel->z;
+    if (sqrtf(dx * dx + dz * dz) > ARENA_FLAMEL_Q_RANGE) return 0;
+    foe->rooted_ms = ARENA_FLAMEL_Q_ROOT_MS;
+    return 1;
+}
+
+/* flamel_cast_w: Philosopher's Bloom (Bloom + Philosopher's Batch merged,
+ * S170-46) -- heals every living ally within radius at once, healing for
+ * more if Flamel himself is standing within capture radius of a node his
+ * own team has marked (Overgrowth, absorbed from Druid). Always "lands"
+ * and consumes the cooldown, same always-commits convention as Doc Wheel's
+ * R -- an AoE heal isn't a single-target poke that can whiff. */
+static void flamel_cast_w(ArenaHero *flamel, int owner) {
+    int on_marked_ground = 0;
+    for (int n = 0; n < ARENA_NODE_COUNT; n++) {
+        ArenaNode *node = &arena_state.nodes[n];
+        if (node->marked_by_team != flamel->team) continue;
+        float ndx = flamel->x - node->x, ndz = flamel->z - node->z;
+        if (sqrtf(ndx * ndx + ndz * ndz) <= ARENA_NODE_CAPTURE_RADIUS) { on_marked_ground = 1; break; }
+    }
+    int heal = on_marked_ground ? ARENA_FLAMEL_W_HEAL_MARKED : ARENA_FLAMEL_W_HEAL_BASE;
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+        ArenaHero *ally = &arena_state.heroes[i];
+        if (i == owner || !ally->active || !ally->alive) continue;
+        if (ally->team != flamel->team) continue;
+        float dx = ally->x - flamel->x, dz = ally->z - flamel->z;
+        if (sqrtf(dx * dx + dz * dz) > ARENA_FLAMEL_W_RADIUS) continue;
+        ally->hp += heal;
+        if (ally->hp > ally->max_hp) ally->hp = ally->max_hp;
+    }
+}
+
+/* execute_scale_damage: linearly scales from base_dmg at 100% target HP up
+ * to low_hp_dmg at ~0% target HP -- same shape as doc_wheel_heal_amount,
+ * inverted for damage instead of healing (Morrigan's death-omen kit,
+ * S170-47: "the crow confirms the kill"). */
+static int execute_scale_damage(const ArenaHero *target, int base_dmg, int low_hp_dmg) {
+    if (target->max_hp <= 0) return base_dmg;
+    float hp_pct = (float)target->hp / (float)target->max_hp;
+    if (hp_pct < 0.0f) hp_pct = 0.0f;
+    if (hp_pct > 1.0f) hp_pct = 1.0f;
+    float dmg = base_dmg + (low_hp_dmg - base_dmg) * (1.0f - hp_pct);
+    return (int)dmg;
+}
+
+/* morrigan_cast_q: The Washer's Strike, instant hit-if-in-range (same
+ * precedent as Ghost/Tree/Pizza's Q), execute-scaled via
+ * execute_scale_damage. Returns 1 if it landed, 0 on a whiff. */
+static int morrigan_cast_q(ArenaHero *morrigan, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return 0;
+    float dx = foe->x - morrigan->x, dz = foe->z - morrigan->z;
+    if (sqrtf(dx * dx + dz * dz) > ARENA_MORRIGAN_Q_RANGE) return 0;
+    apply_damage(foe, apply_armor(execute_scale_damage(foe, ARENA_MORRIGAN_Q_DAMAGE_BASE, ARENA_MORRIGAN_Q_DAMAGE_LOW_HP),
+                                   arena_hero_armor(foe)));
+    return 1;
+}
+
+/* morrigan_cast_w: Three Forms -- teleports to the nearest enemy's position
+ * and roots them on arrival ("she appears where he doesn't expect, in
+ * another form"). No range check -- a sudden appearance, not a skillshot.
+ * Returns 1 if it landed, 0 with no living enemy at all. */
+static int morrigan_cast_w(ArenaHero *morrigan, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return 0;
+    morrigan->x = foe->x;
+    morrigan->z = foe->z;
+    morrigan->moving = 0;
+    foe->rooted_ms = ARENA_MORRIGAN_W_ROOT_MS;
+    return 1;
+}
+
+/* dagda_cast_q: "the same tool, either direction, depending only on which
+ * end swings first" -- built literally. A hittable enemy in range takes
+ * priority (the killing end); absent that, a hurt living ally in range
+ * gets the reviving end, simplified to a heal since no respawn system
+ * exists to revive a dead ally into. Returns 1 if either end landed, 0 on
+ * a full whiff (nothing valid in range at all). */
+static int dagda_cast_q(ArenaHero *dagda, ArenaHero *foe, ArenaHero *ally) {
+    if (foe && hero_is_hittable(foe)) {
+        float dx = foe->x - dagda->x, dz = foe->z - dagda->z;
+        if (sqrtf(dx * dx + dz * dz) <= ARENA_DAGDA_Q_RANGE) {
+            apply_damage(foe, apply_armor(ARENA_DAGDA_Q_KILL_DAMAGE, arena_hero_armor(foe)));
+            return 1;
+        }
+    }
+    if (ally && ally->alive && ally->hp < ally->max_hp) {
+        float dx = ally->x - dagda->x, dz = ally->z - dagda->z;
+        if (sqrtf(dx * dx + dz * dz) <= ARENA_DAGDA_Q_RANGE) {
+            ally->hp += ARENA_DAGDA_Q_REVIVE_HEAL;
+            if (ally->hp > ally->max_hp) ally->hp = ally->max_hp;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* dagda_cast_w: Uaithne, called by name -- all three master strains played
+ * over the whole hall in one go. One AoE cast, everyone in radius
+ * experiences a different strain depending on side: allies get joy (heal),
+ * hittable enemies get sorrow+sleep (root+silence) at once. Always lands
+ * and consumes the cooldown, same always-commits convention as other AoE
+ * ultimates in this roster (Doc Wheel's R) -- a hall-filling cast isn't a
+ * single-target poke that can whiff. */
+static void dagda_cast_w(ArenaHero *dagda, int owner) {
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+        ArenaHero *other = &arena_state.heroes[i];
+        if (i == owner || !other->active || !other->alive) continue;
+        float dx = other->x - dagda->x, dz = other->z - dagda->z;
+        if (sqrtf(dx * dx + dz * dz) > ARENA_DAGDA_W_RADIUS) continue;
+        if (other->team == dagda->team) {
+            other->hp += ARENA_DAGDA_W_ALLY_HEAL;
+            if (other->hp > other->max_hp) other->hp = other->max_hp;
+        } else if (hero_is_hittable(other)) {
+            other->rooted_ms = ARENA_DAGDA_W_ROOT_MS;
+            other->silenced_ms = ARENA_DAGDA_W_SILENCE_MS;
+        }
+    }
+}
+
 void arena_cast_q(int owner) {
     if (owner < 0 || owner >= ARENA_MAX_HEROES) return;
     ArenaHero *h = &arena_state.heroes[owner];
@@ -419,6 +696,31 @@ void arena_cast_q(int owner) {
         }
         break;
     }
+    case ARENA_HERO_TREE:
+        if (tree_cast_q(h, foe)) {
+            h->q_cooldown_ms = cast_cooldown(h, ARENA_TREE_Q_COOLDOWN_MS);
+        }
+        break;
+    case ARENA_HERO_PIZZA:
+        if (pizza_cast_q(h, foe)) {
+            h->q_cooldown_ms = cast_cooldown(h, ARENA_PIZZA_Q_COOLDOWN_MS);
+        }
+        break;
+    case ARENA_HERO_FLAMEL:
+        if (flamel_cast_q(h, foe)) {
+            h->q_cooldown_ms = cast_cooldown(h, ARENA_FLAMEL_Q_COOLDOWN_MS);
+        }
+        break;
+    case ARENA_HERO_MORRIGAN:
+        if (morrigan_cast_q(h, foe)) {
+            h->q_cooldown_ms = cast_cooldown(h, ARENA_MORRIGAN_Q_COOLDOWN_MS);
+        }
+        break;
+    case ARENA_HERO_DAGDA:
+        if (dagda_cast_q(h, foe, arena_nearest_ally(owner))) {
+            h->q_cooldown_ms = cast_cooldown(h, ARENA_DAGDA_Q_COOLDOWN_MS);
+        }
+        break;
     }
 }
 
@@ -466,10 +768,37 @@ void arena_toggle_w(int owner) {
             }
         }
         break;
+    case ARENA_HERO_FLAMEL:
+        /* Philosopher's Bloom: AoE ally heal, always lands (see
+           flamel_cast_w) -- same always-commits convention as Doc Wheel's
+           R, not a whiff-refunded single-target poke. */
+        if (h->w_cooldown_ms > 0) return;
+        flamel_cast_w(h, owner);
+        h->w_cooldown_ms = cast_cooldown(h, ARENA_FLAMEL_W_COOLDOWN_MS);
+        break;
+    case ARENA_HERO_MORRIGAN:
+        /* Three Forms: gap-close + root on the nearest enemy. No-op,
+           cooldown not consumed, if there's no living enemy at all
+           (1v1's own bot could still die mid-match). */
+        if (h->w_cooldown_ms > 0) return;
+        if (morrigan_cast_w(h, arena_nearest_enemy(owner))) {
+            h->w_cooldown_ms = cast_cooldown(h, ARENA_MORRIGAN_W_COOLDOWN_MS);
+        }
+        break;
+    case ARENA_HERO_DAGDA:
+        /* Uaithne, called by name: AoE hits everyone in radius, always
+           lands (see dagda_cast_w) -- same always-commits convention as
+           Flamel's W above. */
+        if (h->w_cooldown_ms > 0) return;
+        dagda_cast_w(h, owner);
+        h->w_cooldown_ms = cast_cooldown(h, ARENA_DAGDA_W_COOLDOWN_MS);
+        break;
     default:
         /* No-op for any hero without a real W in this arena, not a crash
            or a silent wrong kit: Duck's W (Government Clearance) needs
-           objective structures that don't exist here. */
+           objective structures that don't exist here. Tree's W
+           (Untranslated) and Pizza's W (I Am The Chosen One) both fall here
+           too -- unbuildable/pure-visual, flagged in the header comments. */
         break;
     }
 }
@@ -528,6 +857,70 @@ void arena_cast_r(int owner) {
         }
         h->r_cooldown_ms = cast_cooldown(h, ARENA_DOC_WHEEL_R_COOLDOWN_MS);
         break;
+    case ARENA_HERO_TREE:
+        /* Grand Secret, simplified from "roots until recast, min 8s" to a
+           fixed-duration self-root + armor buff + heal -- same
+           fixed-duration simplification already used for Frog's R and
+           Ghost's R zone. rooted_ms doubles as "immune to displacement"
+           (see duck_pull_foe). */
+        h->rooted_ms = ARENA_TREE_R_ROOT_MS;
+        h->r_active_ms = ARENA_TREE_R_ROOT_MS;
+        h->hp += ARENA_TREE_R_HEAL;
+        if (h->hp > h->max_hp) h->hp = h->max_hp;
+        h->r_cooldown_ms = cast_cooldown(h, ARENA_TREE_R_COOLDOWN_MS);
+        break;
+    case ARENA_HERO_PIZZA:
+        /* Nobody Ever Checks: HP cannot drop below 1 for the duration -- a
+           real damage floor via apply_damage's survive_floor_ms check, not
+           a simplified-away shield (contrast Doc Wheel's R, deferred for
+           exactly that reason). */
+        h->survive_floor_ms = ARENA_PIZZA_R_FLOOR_MS;
+        h->r_cooldown_ms = cast_cooldown(h, ARENA_PIZZA_R_COOLDOWN_MS);
+        break;
+    case ARENA_HERO_FLAMEL:
+        /* Elixir of Wild Growth (Elixir of Life + Wild Growth merged): a
+           fixed zone (reusing Ghost's r_zone_x/z/tick_ms fields) that roots
+           enemies and heals allies each tick for its duration -- see
+           tick_hero_kit's zone tick below -- plus a one-time mass-mark of
+           nodes in radius at cast time. The doc's "heavy slow" is
+           simplified to a full root: no per-hero movement-speed-multiplier
+           system exists in this arena yet, flagged. */
+        h->r_zone_x = h->x;
+        h->r_zone_z = h->z;
+        h->r_zone_tick_ms = 0;
+        h->r_active_ms = ARENA_FLAMEL_R_DURATION_MS;
+        for (int n = 0; n < ARENA_NODE_COUNT; n++) {
+            ArenaNode *node = &arena_state.nodes[n];
+            float ndx = h->x - node->x, ndz = h->z - node->z;
+            if (sqrtf(ndx * ndx + ndz * ndz) <= ARENA_FLAMEL_R_RADIUS) {
+                node->marked_by_team = h->team;
+                node->mark_ms_remaining = ARENA_FLAMEL_MARK_MS;
+            }
+        }
+        h->r_cooldown_ms = cast_cooldown(h, ARENA_FLAMEL_R_COOLDOWN_MS);
+        break;
+    case ARENA_HERO_MORRIGAN:
+        /* The Crow Confirms It: a fixed zone (reusing Ghost's
+           r_zone_x/z/tick_ms fields) that deals execute-scaled DPS to
+           enemies inside for its duration -- see tick_hero_kit's zone tick
+           below. No ally-heal side (unlike Ghost/Flamel's R) -- a war
+           goddess's ultimate isn't a support tool. */
+        h->r_zone_x = h->x;
+        h->r_zone_z = h->z;
+        h->r_zone_tick_ms = 0;
+        h->r_active_ms = ARENA_MORRIGAN_R_DURATION_MS;
+        h->r_cooldown_ms = cast_cooldown(h, ARENA_MORRIGAN_R_COOLDOWN_MS);
+        break;
+    case ARENA_HERO_DAGDA:
+        /* The force-fed porridge: a real damage floor (like Pizza's R) plus
+           a real heal on top -- "eats every bite, unhurt, fights the next
+           day regardless," enduring AND coming out ahead, not just
+           surviving. */
+        h->survive_floor_ms = ARENA_DAGDA_R_FLOOR_MS;
+        h->hp += ARENA_DAGDA_R_HEAL;
+        if (h->hp > h->max_hp) h->hp = h->max_hp;
+        h->r_cooldown_ms = cast_cooldown(h, ARENA_DAGDA_R_COOLDOWN_MS);
+        break;
     }
 }
 
@@ -545,6 +938,31 @@ static void tick_hero_kit(ArenaHero *h, ArenaHero *foe, ArenaHero *ally, unsigne
     if (h->intangible_ms > 0) {
         h->intangible_ms -= (int)dt_ms;
         if (h->intangible_ms < 0) h->intangible_ms = 0;
+    }
+    /* rooted_ms/survive_floor_ms (S170-46): generic status effects, any
+       kit's ability can apply them, same reasoning as silence/intangible
+       above. */
+    if (h->rooted_ms > 0) {
+        h->rooted_ms -= (int)dt_ms;
+        if (h->rooted_ms < 0) h->rooted_ms = 0;
+    }
+    if (h->survive_floor_ms > 0) {
+        h->survive_floor_ms -= (int)dt_ms;
+        if (h->survive_floor_ms < 0) h->survive_floor_ms = 0;
+    }
+    /* burning_ms/burn_dps (S170-46, Pizza's Q): fixed-interval DoT tick,
+       same 1000ms-accumulator pattern as Ghost's R zone. burn_tick_ms
+       resets when the burn ends so a later re-application starts clean. */
+    if (h->burning_ms > 0) {
+        if (h->alive) {
+            h->burn_tick_ms += (int)dt_ms;
+            while (h->burn_tick_ms >= 1000 && h->burning_ms > 0) {
+                h->burn_tick_ms -= 1000;
+                apply_damage(h, h->burn_dps);
+            }
+        }
+        h->burning_ms -= (int)dt_ms;
+        if (h->burning_ms <= 0) { h->burning_ms = 0; h->burn_tick_ms = 0; }
     }
 
     /* Loop Back's history ring buffer (S170-33) is sampled for every hero,
@@ -592,8 +1010,7 @@ static void tick_hero_kit(ArenaHero *h, ArenaHero *foe, ArenaHero *ally, unsigne
                 if (hero_is_hittable(foe)) {
                     float dx = foe->x - h->r_zone_x, dz = foe->z - h->r_zone_z;
                     if (sqrtf(dx * dx + dz * dz) <= ARENA_GHOST_R_RADIUS) {
-                        foe->hp -= apply_armor(ARENA_GHOST_R_DPS, arena_hero_armor(foe));
-                        if (foe->hp <= 0) { foe->hp = 0; foe->alive = 0; }
+                        apply_damage(foe, apply_armor(ARENA_GHOST_R_DPS, arena_hero_armor(foe)));
                     }
                 }
                 /* Ally-heal side (S170-45): "same zone, opposite effect
@@ -607,6 +1024,88 @@ static void tick_hero_kit(ArenaHero *h, ArenaHero *foe, ArenaHero *ally, unsigne
                     }
                 }
             }
+        }
+        break;
+    case ARENA_HERO_TREE:
+        /* Grand Secret's fixed-duration armor/root window (see arena_cast_r) --
+           rooted_ms already decrements generically above; this only owns
+           r_active_ms, same pattern as Unicorn/Ghost. */
+        if (h->r_active_ms > 0) {
+            h->r_active_ms -= (int)dt_ms;
+            if (h->r_active_ms < 0) h->r_active_ms = 0;
+        }
+        break;
+    case ARENA_HERO_PIZZA:
+        /* Uninvestigated Fire: an always-on burn aura, not a cast -- ticks
+           independently of Q/W/R cooldowns. Pizza is immune to its own
+           burn (per the doc) since this only ever damages `foe`, never h
+           itself. The node-corruption half of this passive is handled
+           generically in arena_tick_nodes, not here. Only checks the
+           single nearest-foe parameter (same limitation as Ghost's R zone
+           in team mode -- an existing, accepted precedent, not a new one). */
+        if (h->alive) {
+            h->aura_tick_ms += (int)dt_ms;
+            while (h->aura_tick_ms >= 1000) {
+                h->aura_tick_ms -= 1000;
+                if (foe && hero_is_hittable(foe)) {
+                    float dx = foe->x - h->x, dz = foe->z - h->z;
+                    if (sqrtf(dx * dx + dz * dz) <= ARENA_PIZZA_AURA_RADIUS) {
+                        apply_damage(foe, ARENA_PIZZA_AURA_DPS);
+                    }
+                }
+            }
+        }
+        break;
+    case ARENA_HERO_FLAMEL:
+        if (h->r_active_ms > 0) {
+            h->r_active_ms -= (int)dt_ms;
+            if (h->r_active_ms < 0) h->r_active_ms = 0;
+            h->r_zone_tick_ms += (int)dt_ms;
+            while (h->r_zone_tick_ms >= 1000) {
+                h->r_zone_tick_ms -= 1000;
+                if (foe && hero_is_hittable(foe)) {
+                    float dx = foe->x - h->r_zone_x, dz = foe->z - h->r_zone_z;
+                    if (sqrtf(dx * dx + dz * dz) <= ARENA_FLAMEL_R_RADIUS) {
+                        foe->rooted_ms = ARENA_FLAMEL_R_ROOT_MS;
+                    }
+                }
+                if (ally && ally->alive) {
+                    float adx = ally->x - h->r_zone_x, adz = ally->z - h->r_zone_z;
+                    if (sqrtf(adx * adx + adz * adz) <= ARENA_FLAMEL_R_RADIUS) {
+                        ally->hp += ARENA_FLAMEL_R_HEAL_PER_TICK;
+                        if (ally->hp > ally->max_hp) ally->hp = ally->max_hp;
+                    }
+                }
+            }
+        }
+        break;
+    case ARENA_HERO_MORRIGAN:
+        /* The Crow Confirms It: execute-scaled DPS zone tick, same
+           fixed-interval pattern as Ghost/Flamel's R. No ally-heal side. */
+        if (h->r_active_ms > 0) {
+            h->r_active_ms -= (int)dt_ms;
+            if (h->r_active_ms < 0) h->r_active_ms = 0;
+            h->r_zone_tick_ms += (int)dt_ms;
+            while (h->r_zone_tick_ms >= 1000) {
+                h->r_zone_tick_ms -= 1000;
+                if (foe && hero_is_hittable(foe)) {
+                    float dx = foe->x - h->r_zone_x, dz = foe->z - h->r_zone_z;
+                    if (sqrtf(dx * dx + dz * dz) <= ARENA_MORRIGAN_R_RADIUS) {
+                        apply_damage(foe, apply_armor(
+                            execute_scale_damage(foe, ARENA_MORRIGAN_R_DAMAGE_BASE, ARENA_MORRIGAN_R_DAMAGE_LOW_HP),
+                            arena_hero_armor(foe)));
+                    }
+                }
+            }
+        }
+        break;
+    case ARENA_HERO_DAGDA:
+        /* The Undry: passive self HP regen, always on, no cooldown/cast
+           gate at all -- "no one leaves it unsatisfied." */
+        if (h->alive) {
+            float regen = ARENA_DAGDA_PASSIVE_REGEN_PER_SEC * ((float)dt_ms / 1000.0f);
+            h->hp += (int)regen;
+            if (h->hp > h->max_hp) h->hp = h->max_hp;
         }
         break;
     default:
@@ -663,6 +1162,44 @@ static void bot_cast_kit_if_ready(ArenaHero *bot, ArenaHero *foe) {
            correctly regardless of hero. Intentional no-op here, not a
            missing case. */
         break;
+    case ARENA_HERO_TREE:
+        if (bot->q_cooldown_ms <= 0 && dist <= ARENA_TREE_Q_RANGE) {
+            arena_cast_q(bot->owner);
+        } else if (bot->hp < bot->max_hp / 3 && bot->r_cooldown_ms <= 0) {
+            arena_cast_r(bot->owner);
+        }
+        break;
+    case ARENA_HERO_PIZZA:
+        if (bot->q_cooldown_ms <= 0 && dist <= ARENA_PIZZA_Q_RANGE) {
+            arena_cast_q(bot->owner);
+        } else if (bot->hp < bot->max_hp / 4 && bot->r_cooldown_ms <= 0) {
+            arena_cast_r(bot->owner);
+        }
+        break;
+    case ARENA_HERO_FLAMEL:
+        /* Q is the only foe-targeted piece of this kit -- W/R are ally-AoE
+           and have no useful action in the 1v1 local demo's bot heuristic,
+           same reasoning as Doc Wheel above. */
+        if (bot->q_cooldown_ms <= 0 && dist <= ARENA_FLAMEL_Q_RANGE) {
+            arena_cast_q(bot->owner);
+        }
+        break;
+    case ARENA_HERO_MORRIGAN:
+        if (bot->q_cooldown_ms <= 0 && dist <= ARENA_MORRIGAN_Q_RANGE) {
+            arena_cast_q(bot->owner);
+        } else if (bot->w_cooldown_ms <= 0) {
+            arena_toggle_w(bot->owner); /* Three Forms: closes distance on its own */
+        } else if (bot->r_cooldown_ms <= 0 && dist <= ARENA_MORRIGAN_R_RADIUS) {
+            arena_cast_r(bot->owner);
+        }
+        break;
+    case ARENA_HERO_DAGDA:
+        if (bot->q_cooldown_ms <= 0 && dist <= ARENA_DAGDA_Q_RANGE) {
+            arena_cast_q(bot->owner);
+        } else if (bot->hp < bot->max_hp / 3 && bot->r_cooldown_ms <= 0) {
+            arena_cast_r(bot->owner);
+        }
+        break;
     }
 }
 
@@ -690,6 +1227,7 @@ void arena_update(unsigned int dt_ms) {
 
     update_hero_motion(&arena_state.heroes[0], dt_sec);
     update_hero_motion(&arena_state.heroes[1], dt_sec);
+    arena_tick_nodes(dt_ms);
     resolve_combat(dt_ms);
     /* No ally in the 1v1 local path (S170-45: arena_nearest_ally only
        exists for team mode) -- NULL is the correct value, same NULL-safety
@@ -742,6 +1280,8 @@ void arena_init_teams(void) {
     arena_state.nodes[0].z = 4.0f;
     arena_state.nodes[1].x = 4.0f;
     arena_state.nodes[1].z = -4.0f;
+    arena_state.nodes[0].marked_by_team = -1;
+    arena_state.nodes[1].marked_by_team = -1;
     arena_state.winner = 0;
 }
 
@@ -767,6 +1307,7 @@ void arena_update_teams(unsigned int dt_ms) {
         if (!h->active) continue;
         update_hero_motion(h, dt_sec);
     }
+    arena_tick_nodes(dt_ms);
 
     /* Melee combat: each active, alive hero independently attacks its own
        nearest enemy if one is in range and its cooldown is ready -- this is
@@ -784,8 +1325,7 @@ void arena_update_teams(unsigned int dt_ms) {
         float dx = foe->x - h->x, dz = foe->z - h->z;
         if (sqrtf(dx * dx + dz * dz) > ARENA_ATTACK_RANGE) continue;
         if (h->attack_cooldown_ms > 0) continue;
-        if (hero_is_hittable(foe)) foe->hp -= apply_armor(ARENA_ATTACK_DAMAGE, arena_hero_armor(foe));
-        if (foe->hp <= 0) { foe->hp = 0; foe->alive = 0; }
+        if (hero_is_hittable(foe)) apply_damage(foe, apply_armor(ARENA_ATTACK_DAMAGE, arena_hero_armor(foe)));
         h->attack_cooldown_ms = ARENA_ATTACK_COOLDOWN_MS;
     }
 

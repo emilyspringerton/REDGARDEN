@@ -842,3 +842,68 @@ widening rating-search-window matching, which doesn't fit the existing spawn-on-
 `apps/matchmaker` binary as-is — a real queue rewrite, explicitly scoped as its own future pass,
 not bolted on as a flag. Design only; no schema, endpoint, or queue code landed. Golden-indexed
 as REDGARDEN-RANKED.
+
+**S170-46/47: territory system + five new heroes (Tree, Pizza, Flamel, Morrigan, Dagda) — the
+roster more than doubles, 5 → 10.** Direct continuation of the allies/Doc Wheel pass's own roster
+audit: once allies were exhausted, three systems remained blocking the rest of the queued heroes
+(territory/resource economy, multi-unit-per-player, non-piloted units). Asked directly which to
+build next; founder picked **territory/resource economy** — it unblocks the most heroes at once
+(Tree, Pizza, and what was then still a separate Druid) and is Flamel's own cooking prerequisite.
+
+**The territory system itself:** the two `ArenaNode` markers already existed but were purely
+decorative (rendered as flat placeholder markers in `apps/arena/src/main.c`, zero gameplay logic).
+Extended with `pressure` (signed, -100..100), `owner` (derived from a threshold crossing),
+`marked_by_team`/`mark_ms_remaining` (Flamel's Overgrowth marking). `arena_tick_nodes()` sums
+weighted living-hero presence per team within a capture radius each tick (Tree counts double, Root
+Network), drifts pressure toward whichever team is ahead (or decays toward neutral if tied), and
+recomputes owner. Called from both `arena_update()` (1v1) and `arena_update_teams()` (team mode)
+with zero special-casing — the same "generalizes cleanly" precedent as `arena_nearest_ally`/
+`arena_nearest_enemy` before it. A `apply_damage()` helper was added to centralize every damage
+call site's HP-floor/death logic in one place (previously duplicated at each site) — needed for
+real, not a nice-to-have refactor, since Pizza's R is an actual damage floor status effect (not a
+simplified-away shield the way Doc Wheel's R was) and every damage site needed to honor it
+consistently.
+
+**Founder mid-build redirect: "druid and flamel should be the same hero."** Arrived after the
+territory design was settled but before any hero code was written. Cross-checked `TYLER/
+multiverse_heroes.md` first: "Druid" had zero lore entries anywhere — a pure REDGARDEN-side generic
+archetype — while Flamel (#110, Nicolas Flamel) is a fully-realized named historical figure. Kept
+Flamel's name/identity, folded Druid's kit into it as flavor (his alchemy *is* literal cultivation):
+Passive merges Great Work + Overgrowth (marking); Q is Druid's self-contained Vine Growth (root, no
+economy dependency); W merges Bloom + Philosopher's Batch into one AoE ally heal with a marked-
+ground bonus; R merges Elixir of Life's team-ultimate framing with Wild Growth's AoE shape (zone
+root + heal-over-time + mass-mark). Documented in `docs/HEROES_VS0.md` before any code, same
+docs-before-software discipline used for every other hero this session.
+
+**Tree and Pizza** built against the same territory hooks: Tree's Root Network passive needs no
+ability code at all (arena_tick_nodes reads hero_id directly); its Q/R are cone/until-recast
+abilities simplified to the same instant-range-check and fixed-duration patterns already
+established for Ghost/Frog. Pizza's Uninvestigated Fire is a real always-on burn aura (not cast-
+gated) plus a node-corruption pull (simplified from the doc's true 4-state CORRUPTED concept to
+"pulls contested pressure toward neutral," flagged); its R (a real HP-floor status, not simplified
+away) is what forced the `apply_damage()` centralization above.
+
+**Then, mid-session, two more founder-driven additions on top of the same pass: "add the morrigan
+as a meta jungler for the dynamic jungle," then "add the other irish guy too with the two natured
+hammer."** Checked `TYLER/multiverse_heroes.md` before designing either — both are real, adjacent
+entries (#68 Morrigan, #69 Dagda), and `docs/HEROES_VS0.md` already had a "flagged, not built" note
+about a Morrigan/Druid counter-play relationship from an earlier pass, now resolved for real against
+Flamel instead of the discarded Druid name. No standalone jungle-camp system exists in this arena,
+so Morrigan's "jungler" identity was built as an affinity for *contested* (not yet claimed) node
+ground, rather than inventing a second system alongside the one just built. Dagda's signature "same
+club, either direction" is implemented literally in his Q: swings the killing end at a hittable
+enemy in range if one's there, otherwise the reviving end (simplified to a strong heal — no respawn
+system exists to revive a dead ally into) on a hurt ally instead.
+
+**Verified live** across the full 10-hero roster: relaunched the bot pool (`scripts/
+launch_arena_pools.sh start 20`) and grepped every persistent bot's draft log — hero_ids 0 through
+9 all drafted successfully (2 picks each across 20 bots), confirming the pick-validation bound
+(`apps/arena_server`) and draft modulo (`apps/arena_bot`) were both correctly widened from the
+previous 8-hero roster. Headless coverage: 62 new assertions across territory mechanics and all
+five heroes (`tests/test_arena_game.c`), all passing (216 total, up from 154 before this pass) —
+including one caught-and-fixed test bug of the same shape as this session's earlier Frog test bug:
+an initial exact-value assertion on Morrigan's R execute-tick damage was invalidated by an
+unaccounted-for melee auto-attack landing in the same update tick, and separately by HP-floor
+clamping at 0 making an exact post-damage value impossible for the near-dead case — fixed by
+comparing damage *deltas* across two isolated setups (matching the pattern already used for
+Doc Wheel's and Morrigan's own HP%-scaling tests) instead of asserting an absolute value.
