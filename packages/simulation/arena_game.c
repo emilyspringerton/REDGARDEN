@@ -194,7 +194,7 @@ ArenaHero *arena_nearest_enemy(int owner) {
 
 /* arena_nearest_ally: the nearest active, living hero on the SAME team as
  * `owner`, excluding owner itself. Mirrors arena_nearest_enemy exactly
- * (S170-34) -- the enabling primitive for every ally-targeted kit piece
+ * (S170-45) -- the enabling primitive for every ally-targeted kit piece
  * previously skipped for having no target in 1v1. */
 ArenaHero *arena_nearest_ally(int owner) {
     if (owner < 0 || owner >= ARENA_MAX_HEROES) return NULL;
@@ -214,7 +214,7 @@ ArenaHero *arena_nearest_ally(int owner) {
     return best;
 }
 
-/* cast_cooldown: applies the generic next_cast_refund buff (S170-34,
+/* cast_cooldown: applies the generic next_cast_refund buff (S170-45,
  * Frog's Borrowed Time) -- returns 0 and consumes the buff if it's set on
  * h, else returns normal_ms unchanged. Every Q/W/R cooldown-assignment
  * site in this file routes through this so any future ally-buff kit gets
@@ -366,7 +366,7 @@ static void frog_cast_q(ArenaHero *frog) {
 
 /* doc_wheel_heal_amount: Extremely Good At Medicine -- linearly scales from
  * ARENA_DOC_WHEEL_Q_HEAL_BASE at 100% target HP up to
- * ARENA_DOC_WHEEL_Q_HEAL_LOW_HP at 0% target HP (S170-34). */
+ * ARENA_DOC_WHEEL_Q_HEAL_LOW_HP at 0% target HP (S170-45). */
 static int doc_wheel_heal_amount(const ArenaHero *target) {
     if (target->max_hp <= 0) return ARENA_DOC_WHEEL_Q_HEAL_BASE;
     float hp_pct = (float)target->hp / (float)target->max_hp;
@@ -493,7 +493,7 @@ void arena_cast_r(int owner) {
     case ARENA_HERO_GHOST:
         /* Recital: the ally-heal side (docs/HEROES_VS0.md: "same zone,
            opposite effect depending on team") is wired for real now that
-           arena_nearest_ally exists (S170-34) -- see tick_hero_kit's zone
+           arena_nearest_ally exists (S170-45) -- see tick_hero_kit's zone
            tick below for the actual heal application, since it needs the
            `ally` parameter that loop already threads through. */
         h->r_zone_x = h->x;
@@ -596,7 +596,7 @@ static void tick_hero_kit(ArenaHero *h, ArenaHero *foe, ArenaHero *ally, unsigne
                         if (foe->hp <= 0) { foe->hp = 0; foe->alive = 0; }
                     }
                 }
-                /* Ally-heal side (S170-34): "same zone, opposite effect
+                /* Ally-heal side (S170-45): "same zone, opposite effect
                    depending on team" -- the nearest living ally standing in
                    the zone heals for the same rate the foe takes damage. */
                 if (ally && ally->alive) {
@@ -657,7 +657,7 @@ static void bot_cast_kit_if_ready(ArenaHero *bot, ArenaHero *foe) {
     case ARENA_HERO_DOC_WHEEL:
         /* This heuristic is 1v1-only local-demo AI, and Doc Wheel's entire
            kit is ally-targeted -- no useful action exists with no ally
-           present (S170-34). Doc Wheel is a real, working pick in team
+           present (S170-45). Doc Wheel is a real, working pick in team
            mode via apps/arena_bot's own simpler "cast Q periodically"
            heuristic, which the server-side dispatch already handles
            correctly regardless of hero. Intentional no-op here, not a
@@ -691,7 +691,7 @@ void arena_update(unsigned int dt_ms) {
     update_hero_motion(&arena_state.heroes[0], dt_sec);
     update_hero_motion(&arena_state.heroes[1], dt_sec);
     resolve_combat(dt_ms);
-    /* No ally in the 1v1 local path (S170-34: arena_nearest_ally only
+    /* No ally in the 1v1 local path (S170-45: arena_nearest_ally only
        exists for team mode) -- NULL is the correct value, same NULL-safety
        hero_is_hittable already relies on elsewhere. */
     tick_hero_kit(&arena_state.heroes[0], &arena_state.heroes[1], NULL, dt_ms);

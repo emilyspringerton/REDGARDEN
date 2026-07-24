@@ -534,7 +534,7 @@ cooking) — the next roster move is either building one of those systems, or tr
 4-hero roster as complete for this testbed's purposes. That's a real decision point, not
 continuing the same "pick the next one" pattern blindly.
 
-**Decision made, allies built (2026-07-24, S170-34): `arena_nearest_ally`.** Founder chose
+**Decision made, allies built (2026-07-24, S170-45): `arena_nearest_ally`.** Founder chose
 "build allies/multi-hero-per-team in arena" over the other options (build territory, or declare
 the roster complete). Team-mode infrastructure (`ARENA_TEAM_SIZE`/`ARENA_MAX_HEROES`,
 `arena_init_teams`, `arena_nearest_enemy`) already existed from the earlier 10v10 pivot — the

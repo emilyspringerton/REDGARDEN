@@ -411,7 +411,7 @@ static void test_frog_r_vanishes(void) {
 }
 
 static void test_frog_w_noop_in_1v1_no_ally(void) {
-    /* Borrowed Time is wired for real now (S170-34, arena_nearest_ally) --
+    /* Borrowed Time is wired for real now (S170-45, arena_nearest_ally) --
        this is no longer "unimplemented," it's a real no-op because 1v1
        genuinely has no teammate to target, same as Ghost's R ally-heal
        side and Doc Wheel's whole kit in this same mode. */
@@ -530,7 +530,7 @@ static void test_team_wipe_win_condition(void) {
     CHECK(arena_state.winner == 1, "team 0 wins once team 1 has zero active-and-alive heroes left");
 }
 
-/* S170-34: allies. arena_nearest_ally is the enabling primitive for every
+/* S170-45: allies. arena_nearest_ally is the enabling primitive for every
  * ally-targeted kit piece previously skipped for having no target in 1v1
  * (Ghost's R heal side, Frog's W, Doc Wheel's entire kit). */
 

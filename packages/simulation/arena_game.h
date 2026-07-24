@@ -72,7 +72,7 @@ typedef enum {
 #define ARENA_GHOST_R_COOLDOWN_MS   20000
 
 /* The Frog — fourth hero kit (S170-33), the last clean-fit pick from
- * S170-32's roster audit at the time (before allies existed, S170-34 below).
+ * S170-32's roster audit at the time (before allies existed, S170-45 below).
  * R (The Secret) is simplified to reuse Ghost's intangible_ms mechanic at a
  * longer duration; "reappear at any visited location" needs its own
  * location-memory system, deferred, not faked as the full ability. Passive
@@ -80,7 +80,7 @@ typedef enum {
  * concept -- arena has no separate enemy-facing view to hide anything from,
  * skipped, flagged.
  * W (Borrowed Time) was originally skipped for having no ally target in
- * 1v1 -- wired for real (S170-34) now that arena_nearest_ally exists. Uses
+ * 1v1 -- wired for real (S170-45) now that arena_nearest_ally exists. Uses
  * the generic next_cast_refund buff field, same mechanism any future
  * ally-buff kit would reuse. */
 #define ARENA_FROG_LOOPBACK_SAMPLE_MS 250 /* Q — Loop Back: how often position/HP is sampled */
@@ -91,7 +91,7 @@ typedef enum {
 #define ARENA_FROG_R_COOLDOWN_MS    25000
 #define ARENA_FROG_W_COOLDOWN_MS    12000 /* Borrowed Time: places the refund buff on an ally */
 
-/* Doc Wheel (Buer) — fifth hero kit (S170-34), the first ally-targeted-only
+/* Doc Wheel (Buer) — fifth hero kit (S170-45), the first ally-targeted-only
  * kit ("the entire kit is being the correct ally to have nearby" per
  * docs/HEROES_VS0.md) and the reason arena_nearest_ally exists at all. The
  * RED GARDEN passive (CORRUPTED-cell decay on heal) is skipped -- arena has
@@ -140,7 +140,7 @@ typedef struct {
      * apply them, but the fields aren't Ghost-specific). */
     int silenced_ms;    /* > 0: cannot cast Q/W/R */
     int intangible_ms;  /* > 0: cannot be hit by attacks or ability damage */
-    /* next_cast_refund: generic ally-buff flag (S170-34, Frog's Borrowed
+    /* next_cast_refund: generic ally-buff flag (S170-45, Frog's Borrowed
      * Time places this on an ally, not itself) -- the next successful Q/W/R
      * cast by whoever carries this flag has its cooldown refunded to 0
      * instead of the normal value, then the flag clears. Generic so any
@@ -201,7 +201,7 @@ void arena_init_teams(void);
 void arena_update_teams(unsigned int dt_ms);
 ArenaHero *arena_nearest_enemy(int owner);
 
-/* arena_nearest_ally (S170-34): the nearest active, living hero on the SAME
+/* arena_nearest_ally (S170-45): the nearest active, living hero on the SAME
  * team as `owner`, excluding `owner` itself. Mirrors arena_nearest_enemy's
  * exact shape/NULL-safety, the enabling primitive for every ally-targeted
  * kit piece previously skipped for having no target in 1v1 (Ghost's R heal
