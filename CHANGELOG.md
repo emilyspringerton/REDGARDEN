@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-07-24 (8)
+
+- NORTHSTAR §12 Phase E (S170-36) started: Milestone-6 equivalent (state serializer + action
+  decoder) from `gpt2-alpine-c/docs/GAME_AI_NORTHSTAR.md`, extended to arena's hero/ability state
+  instead of a REDGARDEN-specific format. New `packages/simulation/arena_ai_bridge.h`/`.c`:
+  `arena_serialize_state()` writes a stable self/foe natural-language state string;
+  `arena_decode_action()` parses a `move:x,z cast_q/w/r:0|1` action string, defaulting missing
+  fields to a safe no-op and failing closed on garbage. 7 new headless tests, all green alongside
+  the full existing suite. Not wired into the live bot or the GPT-2 inference server (`:8088`)
+  yet -- contract only, same sequencing discipline as Phases B→C.
+
 ## 2026-07-24 (7)
 
 - NORTHSTAR §12 Phase D (S170-33) — fourth hero, **The Frog**, the last clean-fit hero from

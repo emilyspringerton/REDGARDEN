@@ -518,5 +518,26 @@ this phase is that fast-follow, applied to REDGARDEN specifically rather than re
   different from first-gen") is exactly a NORN grading job, not a manual eyeball check. "Bots need
   personalities that evolve and learn on their previous matches" is this flywheel, named plainly.
 
-Nothing above is built. Each phase depends on the one before it — the sequence is the plan, not
-just the list.
+**Started 2026-07-24 (S170-36) — Milestone-6 equivalent: state serializer + action decoder for
+arena.** `GAME_AI_NORTHSTAR.md` itself calls this milestone "the contract... everything downstream
+depends on" — the right first slice, not the full fine-tune/self-play loop (Milestones 7-10 need
+an external Colab GPU run and a human to trigger it, not buildable end-to-end in this
+environment). New `packages/simulation/arena_ai_bridge.h`/`.c`:
+
+- `arena_serialize_state(owner, tick_ms, ...)` writes a stable, natural-language state string from
+  either hero's point of view (`self`/`foe`, matching `GAME_AI_NORTHSTAR.md`'s own SHANKPIT
+  framing) — hero name, position, HP, and every generic cooldown/status field Phase D
+  introduced (`q_cd`, `w_active`, `w_cd`, `r_cd`, `r_active`, `silenced`, `intangible`). Same
+  input always produces the same output.
+- `arena_decode_action(...)` parses a `"move:x,z cast_q:0/1 cast_w:0/1 cast_r:0/1"` action string
+  back into a move target + cast flags, defaulting missing fields to a safe no-op rather than
+  garbage, and failing closed (returns 0, "do nothing") on a string with nothing recognizable in
+  it at all.
+
+7 new headless tests, all green alongside the full existing suite. **Not wired into the live bot
+yet** — this is the contract only; feeding it into `bot_cast_kit_if_ready` (or replacing it) via
+an actual `:8088` GPT-2 inference call, and the replay-log → fine-tune → self-play flywheel behind
+that, are separate, later slices gated on this contract existing first — same sequencing
+discipline used between Phases B and C.
+
+Each phase depends on the one before it — the sequence is the plan, not just the list.

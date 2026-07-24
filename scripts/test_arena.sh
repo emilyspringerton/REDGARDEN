@@ -30,6 +30,16 @@ gcc -std=c99 -O2 -Wall -Wextra -I"${ROOT_DIR}/packages" \
   "${ROOT_DIR}/packages/simulation/arena_replay.c" \
   -lm
 
+# Game AI bridge: state serializer + action decoder (NORTHSTAR §12 Phase E,
+# Milestone-6 equivalent, S170-36) -- same headless-testable reasoning.
+gcc -std=c99 -O2 -Wall -Wextra -I"${ROOT_DIR}/packages" \
+  -o "${BUILD_DIR}/test_arena_ai_bridge" \
+  "${ROOT_DIR}/tests/test_arena_ai_bridge.c" \
+  "${ROOT_DIR}/packages/simulation/arena_game.c" \
+  "${ROOT_DIR}/packages/simulation/arena_ai_bridge.c" \
+  -lm
+
 "${BUILD_DIR}/test_arena_game"
 "${BUILD_DIR}/test_mat4"
 "${BUILD_DIR}/test_arena_replay"
+"${BUILD_DIR}/test_arena_ai_bridge"
