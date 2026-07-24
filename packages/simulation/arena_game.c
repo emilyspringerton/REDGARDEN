@@ -5,6 +5,17 @@
 ArenaState arena_state;
 int arena_bot_enabled = 1;
 
+/* arena_creeps_reset (S170-51): shared init helper for both arena_init_*
+ * entry points. memset already zeroes alive/respawn_ms_remaining to the
+ * correct "spawn on the first tick" defaults; the one field that needs an
+ * explicit non-zero sentinel is last_attacked_by_owner (0 would wrongly
+ * mean "owner slot 0", not "never hit"). */
+static void arena_creeps_reset(void) {
+    for (int i = 0; i < ARENA_MAX_CREEPS; i++) {
+        arena_state.creeps[i].last_attacked_by_owner = -1;
+    }
+}
+
 /* ---- Tiny hand-authored feed-forward "brain" for the bot hero ----
  * Same shape as SHANKPIT's bot brain (packages/simulation/neural_net.h,
  * dense_layer(): out = activation(W*in + b)) rather than a copy of it --
@@ -87,6 +98,9 @@ void arena_init_with_heroes(ArenaHeroID player_hero, ArenaHeroID bot_hero) {
     arena_state.nodes[1].z = -4.0f;
     arena_state.nodes[0].marked_by_team = -1;
     arena_state.nodes[1].marked_by_team = -1;
+    arena_state.nodes[0].capturing_team = -1;
+    arena_state.nodes[1].capturing_team = -1;
+    arena_creeps_reset();
 
     arena_state.winner = 0;
 }
@@ -198,8 +212,12 @@ static int apply_armor(int raw_damage, float armor) {
  * simplified-away shield like Doc Wheel's) only needs one place to check
  * survive_floor_ms rather than duplicating the check at every site. Armor
  * is already applied by the caller via apply_armor -- this only handles the
- * HP-floor/death half. */
+ * HP-floor/death half. Also (S170-51 cont'd) the single choke point for
+ * "this hero took damage this tick," which arena_tick_nodes reads to
+ * interrupt a capture channel -- every damage source in this file already
+ * routes through here, so this needed no new call sites of its own. */
 static void apply_damage(ArenaHero *target, int amount) {
+    target->damaged_this_tick = 1;
     target->hp -= amount;
     if (target->hp <= 0) {
         if (target->survive_floor_ms > 0) {
@@ -257,26 +275,22 @@ ArenaHero *arena_nearest_ally(int owner) {
     return best;
 }
 
-/* arena_tick_nodes (S170-46): advances every ArenaNode's capture contest by
- * dt_ms. One pass per node: sum weighted living-hero presence per team
- * within ARENA_NODE_CAPTURE_RADIUS (Tree counts double, Root Network),
- * refresh/decay Flamel's Overgrowth mark, drift pressure toward whichever
- * team is ahead (or decay toward neutral if tied/uncontested), apply a
- * bonus pull on a marked-but-still-neutral node toward the marking team
- * (deterministic simplification of "increased chance of converting",
- * flagged), apply Pizza's corruption pull toward neutral regardless of team
- * composition (simplification of the doc's 4-state CORRUPTED concept,
- * flagged), then clamp and recompute owner from the threshold. Generalizes
- * across 1v1 and team mode with no special-casing, same as
- * arena_nearest_ally/arena_nearest_enemy -- 1v1 already sets team=0/1 on
- * its two hardcoded heroes. */
+/* arena_tick_nodes (S170-46, capture mechanic redesigned S170-50): advances
+ * every ArenaNode's Arathi Basin-style channel by dt_ms. One pass per node:
+ * classify which team(s) have living presence in radius, apply Flamel's
+ * Overgrowth mark refresh/decay, then either start/continue a channel
+ * (exclusive single-team presence), interrupt one (mixed presence, a
+ * Pizza's corruption, or the channeling team leaving), or leave an
+ * already-settled node alone. Generalizes across 1v1 and team mode with no
+ * special-casing, same as arena_nearest_ally/arena_nearest_enemy -- 1v1
+ * already sets team=0/1 on its two hardcoded heroes. */
 void arena_tick_nodes(unsigned int dt_ms) {
-    float dt_sec = (float)dt_ms / 1000.0f;
-
     for (int n = 0; n < ARENA_NODE_COUNT; n++) {
         ArenaNode *node = &arena_state.nodes[n];
-        int old_owner = node->owner; /* "still neutral" gate for the marked-node bonus pull, below */
-        float team_weight[2] = {0.0f, 0.0f};
+        int team_present[2] = {0, 0};
+        int team_visible[2] = {0, 0}; /* present AND not currently stealthed (intangible_ms <= 0) */
+        int team_damaged[2] = {0, 0}; /* any hero of this team, in radius, took damage this tick */
+        int tree_on_team[2] = {0, 0};
         int pizza_in_radius = 0;
         int flamel_marker_team = -1;
 
@@ -285,8 +299,10 @@ void arena_tick_nodes(unsigned int dt_ms) {
             if (!h->active || !h->alive) continue;
             float dx = h->x - node->x, dz = h->z - node->z;
             if (sqrtf(dx * dx + dz * dz) > ARENA_NODE_CAPTURE_RADIUS) continue;
-            int weight = (h->hero_id == ARENA_HERO_TREE) ? ARENA_TREE_CAPTURE_WEIGHT : 1;
-            team_weight[h->team] += (float)weight;
+            team_present[h->team] = 1;
+            if (h->intangible_ms <= 0) team_visible[h->team] = 1;
+            if (h->damaged_this_tick) team_damaged[h->team] = 1;
+            if (h->hero_id == ARENA_HERO_TREE) tree_on_team[h->team] = 1;
             if (h->hero_id == ARENA_HERO_PIZZA) pizza_in_radius = 1;
             if (h->hero_id == ARENA_HERO_FLAMEL) flamel_marker_team = h->team;
         }
@@ -302,41 +318,112 @@ void arena_tick_nodes(unsigned int dt_ms) {
             }
         }
 
-        float diff = team_weight[0] - team_weight[1];
-        if (diff > 0.0f) {
-            node->pressure += ARENA_NODE_PRESSURE_RATE * dt_sec;
-        } else if (diff < 0.0f) {
-            node->pressure -= ARENA_NODE_PRESSURE_RATE * dt_sec;
-        } else if (node->pressure > 0.0f) {
-            node->pressure -= ARENA_NODE_DECAY_RATE * dt_sec;
-            if (node->pressure < 0.0f) node->pressure = 0.0f;
-        } else if (node->pressure < 0.0f) {
-            node->pressure += ARENA_NODE_DECAY_RATE * dt_sec;
-            if (node->pressure > 0.0f) node->pressure = 0.0f;
-        }
+        /* Exactly one team present (and Pizza isn't corrupting the attempt
+           regardless of side) is the only condition that can start or
+           continue a channel -- mixed presence, empty presence, or Pizza
+           in radius all interrupt whatever's in progress.
 
-        if (old_owner == 0 && node->marked_by_team == 0) {
-            node->pressure += ARENA_FLAMEL_MARK_BONUS_RATE * dt_sec;
-        } else if (old_owner == 0 && node->marked_by_team == 1) {
-            node->pressure -= ARENA_FLAMEL_MARK_BONUS_RATE * dt_sec;
-        }
-
-        if (pizza_in_radius) {
-            if (node->pressure > 0.0f) {
-                node->pressure -= ARENA_PIZZA_CORRUPT_PULL_RATE * dt_sec;
-                if (node->pressure < 0.0f) node->pressure = 0.0f;
-            } else if (node->pressure < 0.0f) {
-                node->pressure += ARENA_PIZZA_CORRUPT_PULL_RATE * dt_sec;
-                if (node->pressure > 0.0f) node->pressure = 0.0f;
+           The stealth exception (S170-51 cont'd -- "a stealthed character
+           sneaking in and solo-capping an objective while clueless
+           opponents run around nearby," the archetypal WoW Arathi Basin
+           moment): if a team's ENTIRE presence at this node is stealthed
+           (intangible_ms > 0 -- Frog's R, which the doc itself describes as
+           "vanishes... can't be targeted or seen"), the other team's
+           presence, however visible, never even registers a contest --
+           they don't know there's anything there to fight. A lone
+           stealthed capper channels straight through a crowd of unaware
+           enemies standing right on top of the node. This only ever lets
+           ONE side capture undetected at a time: if both sides happen to be
+           entirely stealthed simultaneously, or both are visible, the
+           normal exclusive-presence rule below still applies unchanged. */
+        int exclusive_team = -1;
+        if (!pizza_in_radius) {
+            if (team_present[0] != team_present[1]) {
+                exclusive_team = team_present[0] ? 0 : 1;
+            } else if (team_present[0] && team_present[1]) {
+                int stealthed_only_0 = !team_visible[0];
+                int stealthed_only_1 = !team_visible[1];
+                if (stealthed_only_0 && !stealthed_only_1) exclusive_team = 0;
+                else if (stealthed_only_1 && !stealthed_only_0) exclusive_team = 1;
             }
         }
 
-        if (node->pressure > 100.0f) node->pressure = 100.0f;
-        if (node->pressure < -100.0f) node->pressure = -100.0f;
+        /* Damage interrupts the capture, same trigger as real WoW Arathi
+           Basin's flag channel (S170-51 cont'd) -- checked before anything
+           else so a hero who got hit this tick can't also make progress
+           this same tick. */
+        if (exclusive_team < 0 || team_damaged[exclusive_team]) {
+            /* Interrupted (nothing was happening, mixed/corrupted presence,
+               or the channeling team took damage) -- owner is left exactly
+               as-is. A defender who denies an attacker doesn't get the node
+               handed back for free; they still have to start their own
+               channel, same as a would-be attacker who gets chased off. */
+            node->capturing_team = -1;
+            node->capture_progress_ms = 0;
+            continue;
+        }
 
-        if (node->pressure >= ARENA_NODE_OWNER_THRESHOLD) node->owner = 1;
-        else if (node->pressure <= -ARENA_NODE_OWNER_THRESHOLD) node->owner = 2;
-        else node->owner = 0;
+        if (node->owner == exclusive_team + 1) {
+            /* Already theirs -- nothing to capture, no channel to run.
+               (+1: owner encodes 0=neutral/1=team0/2=team1, exclusive_team
+               is the raw 0/1 team index -- comparing them directly would
+               make a fresh neutral node (owner=0) collide with team index
+               0, wrongly treated as "already owned by team 0".) */
+            node->capturing_team = -1;
+            node->capture_progress_ms = 0;
+            continue;
+        }
+
+        if (node->capturing_team != exclusive_team) {
+            /* A channel is starting (fresh, or switching from whichever
+               team had been channeling) -- the node flips to neutral
+               immediately, the "neutral period... as you wait for it to
+               finish capturing" the channel spends open and uncaptured,
+               not just at the moment it completes. */
+            node->capturing_team = exclusive_team;
+            node->capture_progress_ms = 0;
+            node->owner = 0;
+
+            /* Interacting with the flag breaks stealth (S170-51 cont'd) --
+               real Arathi Basin's own rule. The sneaking-in part of the
+               archetypal moment is over the instant the channel actually
+               starts; whether the enemy crowd standing right there reacts
+               in time is now down to their own attention/positioning, not
+               a standing invisibility loophole. Only breaks the stealth of
+               heroes on the team that just started this channel, in this
+               node's radius -- an ally elsewhere on the map keeps theirs. */
+            for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+                ArenaHero *h = &arena_state.heroes[i];
+                if (!h->active || !h->alive || h->team != exclusive_team || h->intangible_ms <= 0) continue;
+                float dx = h->x - node->x, dz = h->z - node->z;
+                if (sqrtf(dx * dx + dz * dz) > ARENA_NODE_CAPTURE_RADIUS) continue;
+                h->intangible_ms = 0;
+            }
+        }
+
+        int progress = (int)dt_ms;
+        if (tree_on_team[exclusive_team]) {
+            progress = (int)((float)progress * ARENA_TREE_CHANNEL_SPEED_MULT);
+        }
+        if (node->marked_by_team == exclusive_team) {
+            progress += ARENA_FLAMEL_MARK_CHANNEL_BONUS_MS;
+        }
+        node->capture_progress_ms += progress;
+
+        if (node->capture_progress_ms >= ARENA_NODE_CAPTURE_CHANNEL_MS) {
+            node->owner = exclusive_team + 1; /* encode team index -> owner (1=team0, 2=team1) */
+            node->capturing_team = -1;
+            node->capture_progress_ms = 0;
+        }
+    }
+
+    /* damaged_this_tick is a single-tick flag -- cleared here, once, after
+       every node has had a chance to read it this tick, not inside the
+       per-node loop above (heroes are shared across nodes; clearing mid-
+       loop would make node[1]'s check miss damage node[0]'s check already
+       correctly saw). */
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+        arena_state.heroes[i].damaged_this_tick = 0;
     }
 }
 
@@ -362,6 +449,121 @@ static int hero_is_hittable(const ArenaHero *h) {
        qualifies (e.g. the last enemy died mid-tick) -- treat "no target" the
        same as "not hittable" rather than crashing. */
     return h && h->alive && h->intangible_ms <= 0;
+}
+
+/* creep_spawn: (re)rolls flavor/HP from the creep's own node's CURRENT
+ * owner and places it at the node's position -- the "jungle reacts to who
+ * controls the ground under it" half of S170-51's design. */
+static void creep_spawn(ArenaCreep *creep, const ArenaNode *node) {
+    creep->flavor = (ArenaCreepFlavor)node->owner; /* owner 0/1/2 map directly onto the flavor enum */
+    creep->max_hp = creep->hp = (creep->flavor == ARENA_CREEP_NEUTRAL) ? ARENA_CREEP_NEUTRAL_HP : ARENA_CREEP_TEAM_HP;
+    creep->x = node->x;
+    creep->z = node->z;
+    creep->alive = 1;
+    creep->attack_cooldown_ms = 0;
+    creep->last_attacked_by_owner = -1;
+}
+
+/* arena_tick_creeps (S170-51): see the header declaration's doc comment. */
+void arena_tick_creeps(unsigned int dt_ms) {
+    for (int i = 0; i < ARENA_MAX_CREEPS; i++) {
+        ArenaCreep *creep = &arena_state.creeps[i];
+        ArenaNode *node = &arena_state.nodes[i];
+
+        if (!creep->alive) {
+            creep->respawn_ms_remaining -= (int)dt_ms;
+            if (creep->respawn_ms_remaining <= 0) creep_spawn(creep, node);
+            continue;
+        }
+
+        if (creep->attack_cooldown_ms > 0) creep->attack_cooldown_ms -= (int)dt_ms;
+
+        ArenaHero *target = NULL;
+        float best_dist = 0.0f;
+        for (int h = 0; h < ARENA_MAX_HEROES; h++) {
+            ArenaHero *cand = &arena_state.heroes[h];
+            if (!cand->active || !hero_is_hittable(cand)) continue;
+            float dx = cand->x - creep->x, dz = cand->z - creep->z;
+            float dist = sqrtf(dx * dx + dz * dz);
+            if (dist > ARENA_CREEP_AGGRO_RADIUS) continue;
+            if (!target || dist < best_dist) { target = cand; best_dist = dist; }
+        }
+        if (target && creep->attack_cooldown_ms <= 0) {
+            apply_damage(target, ARENA_CREEP_DAMAGE);
+            creep->attack_cooldown_ms = ARENA_CREEP_ATTACK_COOLDOWN_MS;
+        }
+    }
+}
+
+/* creep_die: applies this creep's flavor-specific reward to whoever landed
+ * the killing blow (tracked via last_attacked_by_owner -- the LAST hit
+ * lands the kill in this arena's simple damage model, so "last attacker"
+ * and "killer" are the same thing here), then queues its respawn. See the
+ * ARENA_MAX_CREEPS header comment for the full reward design. */
+static void creep_die(ArenaCreep *creep, ArenaNode *node) {
+    creep->alive = 0;
+    creep->respawn_ms_remaining = (creep->flavor == ARENA_CREEP_NEUTRAL)
+        ? ARENA_CREEP_NEUTRAL_RESPAWN_MS : ARENA_CREEP_TEAM_RESPAWN_MS;
+
+    if (creep->last_attacked_by_owner < 0) return;
+    ArenaHero *killer = &arena_state.heroes[creep->last_attacked_by_owner];
+
+    if (creep->flavor == ARENA_CREEP_NEUTRAL) {
+        /* The contested prize: a big swing toward capturing THIS node,
+           but only if the killer's team is actually the one channeling it
+           right now -- the reward is for jungle-and-territory synergy, not
+           an unconditional stat pad disconnected from what's happening at
+           the flag itself. */
+        if (node->capturing_team == killer->team) {
+            node->capture_progress_ms += ARENA_CREEP_NEUTRAL_KILL_CAPTURE_BONUS_MS;
+        }
+        return;
+    }
+
+    /* Team-flavored creep: owner index 1/2 map back to team index 0/1. */
+    int owning_team = creep->flavor - 1;
+    if (killer->team == owning_team) {
+        /* Home-turf resupply. */
+        killer->hp += ARENA_CREEP_TEAM_KILL_HEAL;
+        if (killer->hp > killer->max_hp) killer->hp = killer->max_hp;
+    } else if (node->capturing_team == killer->team) {
+        /* Counter-play: farming the enemy's own jungle creep helps flip
+           their node, same "only if actually channeling it" gate as above. */
+        node->capture_progress_ms += ARENA_CREEP_TEAM_KILL_DENY_CAPTURE_BONUS_MS;
+    }
+}
+
+/* arena_hero_attack_creeps (S170-51): see the header declaration's doc
+ * comment. */
+void arena_hero_attack_creeps(unsigned int dt_ms) {
+    (void)dt_ms; /* attack_cooldown_ms is ticked in tick_hero_kit/resolve_combat already; this only spends it */
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+        ArenaHero *h = &arena_state.heroes[i];
+        if (!h->active || !h->alive || h->attack_cooldown_ms > 0) continue;
+
+        ArenaHero *foe = arena_nearest_enemy(i);
+        if (foe && hero_is_hittable(foe)) {
+            float dx = foe->x - h->x, dz = foe->z - h->z;
+            if (sqrtf(dx * dx + dz * dz) <= ARENA_ATTACK_RANGE) continue; /* already busy with an enemy hero this tick */
+        }
+
+        for (int c = 0; c < ARENA_MAX_CREEPS; c++) {
+            ArenaCreep *creep = &arena_state.creeps[c];
+            if (!creep->alive) continue;
+            float dx = creep->x - h->x, dz = creep->z - h->z;
+            if (sqrtf(dx * dx + dz * dz) > ARENA_ATTACK_RANGE) continue;
+
+            /* Creeps have no armor stat -- flat damage, no apply_armor call needed. */
+            creep->hp -= ARENA_ATTACK_DAMAGE;
+            creep->last_attacked_by_owner = i;
+            h->attack_cooldown_ms = ARENA_ATTACK_COOLDOWN_MS;
+            if (creep->hp <= 0) {
+                creep->hp = 0;
+                creep_die(creep, &arena_state.nodes[c]);
+            }
+            break; /* one creep target per hero per attack, same as hero-vs-hero */
+        }
+    }
 }
 
 static void resolve_combat(unsigned int dt_ms) {
@@ -1315,7 +1517,8 @@ void arena_update(unsigned int dt_ms) {
 
     update_hero_motion(&arena_state.heroes[0], dt_sec);
     update_hero_motion(&arena_state.heroes[1], dt_sec);
-    arena_tick_nodes(dt_ms);
+    arena_tick_creeps(dt_ms);
+    arena_hero_attack_creeps(dt_ms);
     resolve_combat(dt_ms);
     /* No ally in the 1v1 local path (S170-45: arena_nearest_ally only
        exists for team mode) -- NULL is the correct value, same NULL-safety
@@ -1331,6 +1534,12 @@ void arena_update(unsigned int dt_ms) {
        wasn't gated -- Duck's Q was yanking it every time it came off
        cooldown. */
     if (arena_bot_enabled) bot_cast_kit_if_ready(&arena_state.heroes[1], &arena_state.heroes[0]);
+    /* Runs last (S170-51 cont'd): a capture channel is interrupted by
+       damage taken this same tick (real Arathi Basin's own rule), so node
+       state needs to see everything above -- creeps, melee, kit ticks, and
+       the bot's own casts -- before deciding whether anyone's channel
+       survives this tick. */
+    arena_tick_nodes(dt_ms);
 
     if (!arena_state.heroes[0].alive) arena_state.winner = 2;
     else if (!arena_state.heroes[1].alive) arena_state.winner = 1;
@@ -1370,6 +1579,9 @@ void arena_init_teams(void) {
     arena_state.nodes[1].z = -4.0f;
     arena_state.nodes[0].marked_by_team = -1;
     arena_state.nodes[1].marked_by_team = -1;
+    arena_state.nodes[0].capturing_team = -1;
+    arena_state.nodes[1].capturing_team = -1;
+    arena_creeps_reset();
     arena_state.winner = 0;
 }
 
@@ -1395,7 +1607,8 @@ void arena_update_teams(unsigned int dt_ms) {
         if (!h->active) continue;
         update_hero_motion(h, dt_sec);
     }
-    arena_tick_nodes(dt_ms);
+    arena_tick_creeps(dt_ms);
+    arena_hero_attack_creeps(dt_ms);
 
     /* Melee combat: each active, alive hero independently attacks its own
        nearest enemy if one is in range and its cooldown is ready -- this is
@@ -1422,6 +1635,10 @@ void arena_update_teams(unsigned int dt_ms) {
         if (!h->active) continue;
         tick_hero_kit(h, arena_nearest_enemy(i), arena_nearest_ally(i), dt_ms);
     }
+    /* Runs last, same reasoning as arena_update()'s own call site: a
+       capture channel needs to see this whole tick's damage (creeps,
+       melee, kit ticks) before deciding whether it's interrupted. */
+    arena_tick_nodes(dt_ms);
 
     int team0_alive = arena_team_alive_count(0);
     int team1_alive = arena_team_alive_count(1);

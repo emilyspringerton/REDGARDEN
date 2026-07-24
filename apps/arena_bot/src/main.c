@@ -39,6 +39,29 @@
 #define TICKET_TOTAL_LEN (TICKET_PAYLOAD_LEN + TICKET_MAC_LEN)
 #define ARENA_MATCHMAKER_PORT 7778 /* separate queue from the card-RTS matchmaker's 7777 */
 
+/* Memorable bot names (founder: "prep for an observation phase... the bots
+ * should have interesting memorable names"), so the leaderboard reads as a
+ * real cast of characters worth watching evolve over time rather than
+ * "player-arenabot-..." IDUNA's own register endpoint defaults to when no
+ * display_name is sent. Drawn from this roster's own mythological well
+ * (Irish/Norse names already in the hero lineup, plus a few flavor originals
+ * in the same register) rather than generic placeholders. */
+static const char *ARENA_BOT_NAMES[] = {
+    "Copper Crow", "Split Antler", "Rootbound", "Ash Ratatoskr", "Last Ember",
+    "Hollow Bell", "Nine Roads", "Whetstone", "Loose Thread", "The Undry Cup",
+    "Broken Compass", "Third Wolf", "Kettlebite", "Long Fetch", "Grey Ledger",
+    "Salt Circuit", "Two-Faced Coin", "Wandering Anvil", "Iron Sparrow", "Debt Collector",
+    "Overgrowth", "Quiet Riot", "Backline Ghost", "Feral Accountant", "The Sneak Cap",
+};
+#define ARENA_BOT_NAME_COUNT (int)(sizeof(ARENA_BOT_NAMES) / sizeof(ARENA_BOT_NAMES[0]))
+
+/* g_bot_name: set once in main() from --index (deterministic, so
+ * scripts/launch_arena_pools.sh's persistent pool gets a stable, non-
+ * colliding roster across restarts) or a pid-based fallback for anyone
+ * running the binary directly without the flag. Read by
+ * register_wotan_identity_once(), defined earlier in this file than main(). */
+static const char *g_bot_name = NULL;
+
 static int sock = -1;
 static struct sockaddr_in server_addr;
 static int my_owner = -1;
@@ -139,9 +162,11 @@ static int register_wotan_identity_once(void) {
     char provider_sub[64];
     snprintf(provider_sub, sizeof(provider_sub), "arenabot-%d-%u",
              (int)getpid(), (unsigned int)time(NULL));
-    char register_body[256];
+    const char *name = g_bot_name ? g_bot_name : ARENA_BOT_NAMES[(unsigned int)getpid() % ARENA_BOT_NAME_COUNT];
+    char register_body[320];
     snprintf(register_body, sizeof(register_body),
-             "{\"provider\":\"redgarden_bot\",\"provider_sub\":\"%s\"}", provider_sub);
+             "{\"provider\":\"redgarden_bot\",\"provider_sub\":\"%s\",\"display_name\":\"%s\"}",
+             provider_sub, name);
     if (http_post_json(iduna_host, iduna_port, "/api/v1/players/register", token,
                         register_body, resp, sizeof(resp), &status) != 0 || status != 200) {
         fprintf(stderr, "[arena_bot] WOTAN: player registration failed (status=%d)\n", status);
@@ -413,10 +438,17 @@ static void play_one_match(void) {
 int main(int argc, char *argv[]) {
     const char *ip = "127.0.0.1";
     int direct_port = 0; /* 0 = go through the arena matchmaker */
+    int name_index = -1;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--host") == 0 && i + 1 < argc) ip = argv[++i];
         else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) direct_port = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--index") == 0 && i + 1 < argc) name_index = atoi(argv[++i]);
     }
+    /* --index (from scripts/launch_arena_pools.sh's spawn loop): a
+       deterministic, stable name per pool slot, so restarting the pool
+       doesn't reshuffle who's who on the leaderboard. Falls back to a
+       pid-derived pick for anyone running the binary directly. */
+    g_bot_name = ARENA_BOT_NAMES[(name_index >= 0 ? (unsigned int)name_index : (unsigned int)getpid()) % ARENA_BOT_NAME_COUNT];
 
     setbuf(stdout, NULL);
     srand((unsigned int)time(NULL) ^ (unsigned int)getpid());

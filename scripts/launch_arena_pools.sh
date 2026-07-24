@@ -69,7 +69,7 @@ start() {
     sleep 1
     echo "starting $n_bots persistent bot(s) into the BOT POOL only..."
     for i in $(seq 1 "$n_bots"); do
-        ./build/red_garden_arena_bot --host 127.0.0.1 > "var/arena_bot_$i.log" 2>&1 &
+        ./build/red_garden_arena_bot --host 127.0.0.1 --index "$i" > "var/arena_bot_$i.log" 2>&1 &
         echo $! >> "$PIDFILE"
     done
 

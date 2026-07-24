@@ -923,3 +923,109 @@ and draft modulo widened once more (10 → 11). Verified live: relaunched the pe
 (22 bots) after a stray-process port conflict from the previous session's leftover matchmaker was
 cleaned up (`pkill -9 -f red_garden`, then a clean relaunch) — all 11 hero_ids (0-10) drafted
 successfully, pool left running on the current build.
+
+**S170-50/51: territory capture redesigned from ambient pressure to a real Arathi Basin-style
+channel, plus territorial jungle creeps.** Founder, mid-session, direct and specific: "we need the
+arathi basin true click to channel capture interruptable a neutral period after the flag flips as
+you wait for it to finish capturing — adds objective-focused play and the possibility of losing
+due to ignoring the objective, not just presence-based." The old model (S170-46: signed `pressure`
+drifting toward whichever team had more weighted bodies nearby, owner derived from a threshold) is
+gone entirely — that model *was* the "just presence based" thing being replaced, not something to
+layer under the new one.
+
+**New model:** exactly one team can channel a node at a time. Exclusive single-team presence
+starts or continues that team's channel; the instant a channel starts against a node NOT already
+owned by the channeling team, the node flips to neutral *immediately* — the "neutral period... as
+you wait for it to finish capturing" the channel spends genuinely open and uncaptured for its whole
+duration, not just at the end. Mixed presence, a Pizza's corruption (redesigned from a pressure-pull
+to a hard channel-interrupt, still "regardless of team composition"), or the channeling team
+leaving all interrupt it — progress resets to 0 and the node does **not** revert to its pre-channel
+owner. A defender who denies an attacker doesn't get the node handed back for free; they have to
+start their own channel too. This is the actual teeth behind "losing due to ignoring the
+objective." Tree's Root Network redesigned from a doubled capture-weight to a doubled channel-speed
+multiplier; Flamel's Overgrowth mark redesigned from a pressure-pull bonus to a flat channel-speed
+bonus on the marking team's own capture — same flavor, new mechanic underneath both.
+
+**Two more authentic Arathi Basin rules added on top, both founder-specified in exact, recognizable
+terms:** (1) *"capturing a flag start channel breaks stealth"* — interacting with the flag reveals
+a stealthed capper (Frog's R, the only real stealth in this roster: "vanishes... can't be targeted
+or seen") the instant their channel starts, not before and not for its whole duration — the sneak
+-in part of the moment is over the moment the channel begins; whether the crowd standing there
+reacts in time is down to their own attention, not a standing invisibility loophole. (2) *"hitting
+the channeling character interrupts the capture"* — a new generic `damaged_this_tick` flag, set by
+`apply_damage()` (every damage source in this file already routes through it, so this needed no new
+call sites), checked by `arena_tick_nodes` to interrupt a channel the instant any hero of the
+channeling team takes damage in radius — real WoW Arathi Basin's own flag-channel pushback rule.
+Required moving `arena_tick_nodes`'s call site to run *after* combat/kit-ticks in both
+`arena_update()` and `arena_update_teams()` (previously first) so it can see the whole tick's
+damage before deciding whether anyone's channel survives it.
+
+**The archetypal moment itself, brought forward on purpose and explicitly requested:** *"like a
+stealthed character shooting in and [ninja]ing an objective while 6 clueless opponents run around
+nearby... a lineage of WoW Arathi PvP."* A lone stealthed hero can channel-capture a node with a
+crowd of visible enemies standing right on top of it, undetected, for as long as the sneaking-in
+part lasts — the stealth-exception rule above (if a team's *entire* presence at a node is
+stealthed, the other team's presence never registers a contest) makes this a real, reproducible
+mechanic, not just flavor text; a dedicated headless test proves it directly (six visible enemies
+in radius, one stealthed capper, channel proceeds anyway).
+
+**Territorial dynamic jungle creeps, the other half of the same request:** *"territories are how
+you control macro and economy, objectives are how the game is won... territory advantage gives the
+ability to influence the meta in terms of what dynamic territorial creeps emerge... controlling the
+flavor and cadence of the jungle helps create the meta to counter certain comps."* One creep per
+node, index-matched, re-rolled on every respawn from that node's *current* owner (not fixed at
+spawn) — the jungle's own population reacts to who controls the ground under it, matching the
+earlier NORTHSTAR §8 "alive and dynamic, not static camps" direction, now built rather than just
+specified. Two flavors, two different rewards, not just two HP totals: a **contested node's** creep
+is rare, tanky, slow-respawning — killing it (only while your team is actually channeling that
+node) grants a large one-time capture-progress bonus, a real tempo swing worth fighting over
+regardless of side. An **owned node's** creep is common, weak, fast-respawning — killed by the
+*owning* team it's a small steady home-turf-resupply heal; killed by the *opposing* team (while
+they're channeling to flip it) it's a smaller capture-progress kick instead — a real counter-play
+tool against a team that's turtled onto a lot of territory, matching "helps create the meta to
+counter certain comps or play styles" directly, not just flavor. Numbers are the difficulty-tiering
+*spirit* of GoblinFoxDragon's real mob archetypes (`server/mob/hills.go`: passive-until-attacked
+low-HP vs. a tougher, rarer target) adapted rather than ported verbatim — GFD's mobs carry a full
+aggro-cone/leash-range system this arena's click-to-move model has no equivalent for.
+
+28 new headless assertions across this pass (251 total). Verified live: rebuilt and relaunched the persistent bot pool
+with real WOTAN credentials now exported (`IDUNA_AGENT_NAME=REDGARDEN-BOTS`) so bot match results
+actually post to the leaderboard (previously silently falling back to self-minted tickets all
+session, since those env vars were never set when launching the pool — fixed as a prerequisite to
+"track the stats of the bots across matches," the other half of this same request); confirmed a
+real ~2.5-minute, 20-hero match ran to completion end-to-end on the redesigned system without
+crashing (291 logged snapshots, a real `match_end` event). One separate, pre-existing operational
+quirk noted, not caused by this pass: the matchmaker occasionally races a freshly-spawned server's
+socket bind against clients' immediate connect attempts under rapid repeated match cycling; bots
+self-heal via their own retry loop, and a single human `--queue` connection is far less likely to
+hit it than 20 bots cycling in a tight loop the way this pass's stress-testing did.
+
+**Replays, the other founder ask this same session ("also watch replays"), status: not built this
+pass.** `packages/simulation/arena_replay.c`'s existing parser only understands the old 1v1
+`hero0`/`hero1` snapshot shape; `apps/arena_server`'s team-mode snapshot log already writes a
+richer `heroes:[...]` array (owner/team/x/z/hp/alive) but omits `hero_id` (no way to know which
+sprite/kit to render per owner) and has no `ability_cast` logging at all. Extending the parser to
+the array format, adding `hero_id` to the snapshot log, and building a team-mode playback path
+(`arena_init_teams`-shaped, not `arena_init_with_heroes`-shaped) is real, scoped, separate follow-on
+work -- flagged here rather than silently rolled into this pass, which was already large.
+
+**Observation-phase prep: memorable bot names, real WOTAN identities confirmed active.** Founder:
+"prep for an observation phase i want to watch the stats of the bots evolve as games progress and
+the bots should have interesting memorable names." Two real gaps closed, not just one wish granted:
+(1) discovered mid-pass that the persistent bot pool had been running all session on *self-minted*
+tickets, not real WOTAN identities -- `IDUNA_AGENT_NAME`/`IDUNA_AGENT_SECRET` were simply never
+exported when launching it, so every bot's match results were silently going nowhere. Fixed
+operationally (the code path already existed, correctly, from S170-41): relaunched with real
+`REDGARDEN-BOTS` credentials exported, confirmed via `/api/v1/players/{id}` and the public
+leaderboard that stats now genuinely accumulate. (2) `apps/arena_bot` never sent IDUNA's own
+`display_name` field on registration (`POST /api/v1/players/register` silently defaults to
+`player-<8 chars of provider_sub>` when it's absent) -- added a curated 25-name pool (Irish/Norse-
+flavored, matching this roster's own mythological register: "Copper Crow," "The Undry Cup," "Ash
+Ratatoskr," etc.) plus a `--index N` flag so `scripts/launch_arena_pools.sh`'s spawn loop assigns
+each pool slot a stable, non-colliding name across restarts (falls back to a pid-derived pick for
+direct/manual launches without the flag). Verified live: queried a real registered player_id back
+through IDUNA and confirmed `display_name":"Rootbound"` came back correctly. The actual watch
+surface already existed from earlier this session: `okemily.com/tournaments.html`'s live REDGARDEN
+leaderboard section, fetching the same public `/api/v1/redgarden/leaderboard` endpoint -- confirmed
+reachable from outside this box. Nothing new to build there; the founder can watch the named bots'
+records evolve at that URL as the persistent pool keeps playing.

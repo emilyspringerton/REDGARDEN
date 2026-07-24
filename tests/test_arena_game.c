@@ -740,115 +740,140 @@ static void test_doc_wheel_r_consumes_cooldown_even_with_zero_allies(void) {
 /* S170-46: territory/node system + Tree, Pizza, and merged Flamel (absorbed
  * former Druid). */
 
-static void test_node_pressure_drifts_toward_team_with_more_presence(void) {
+static void test_node_channel_starts_and_flips_node_neutral_immediately(void) {
+    /* Node starts owned by team 1 (as if team 0 had already captured team
+       1's home node in some earlier state) -- team 1 shows up alone and
+       begins a channel. The node must go neutral the instant the channel
+       starts, not stay owned by team 1 until the channel finishes -- this
+       is the "neutral period... as you wait for it to finish capturing"
+       the founder asked for. */
     arena_init_teams();
     for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
-    arena_state.heroes[0].x = arena_state.nodes[0].x;
-    arena_state.heroes[0].z = arena_state.nodes[0].z;
-
-    arena_tick_nodes(1000);
-
-    CHECK(arena_state.nodes[0].pressure > 0.0f,
-          "a node with only team-0 presence in radius drifts pressure positive (team-0-leaning)");
-}
-
-static void test_node_pressure_decays_toward_neutral_when_uncontested(void) {
-    arena_init_teams();
-    for (int i = 0; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
-    arena_state.nodes[0].pressure = 40.0f;
-
-    arena_tick_nodes(1000);
-
-    CHECK(arena_state.nodes[0].pressure < 40.0f && arena_state.nodes[0].pressure >= 0.0f,
-          "an uncontested node's pressure decays back toward neutral, not stuck");
-}
-
-static void test_node_owner_flips_at_threshold(void) {
-    arena_init_teams();
-    for (int i = 0; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
-
-    arena_state.nodes[0].pressure = ARENA_NODE_OWNER_THRESHOLD - 1.0f;
-    arena_tick_nodes(0); /* dt=0: recomputes owner from current pressure without drifting it */
-    CHECK(arena_state.nodes[0].owner == 0, "a node just below the threshold is still contested (owner 0)");
-
-    arena_state.nodes[0].pressure = ARENA_NODE_OWNER_THRESHOLD;
-    arena_tick_nodes(0);
-    CHECK(arena_state.nodes[0].owner == 1, "a node at/above the threshold flips to team 0's ownership");
-
-    arena_state.nodes[0].pressure = -ARENA_NODE_OWNER_THRESHOLD;
-    arena_tick_nodes(0);
-    CHECK(arena_state.nodes[0].owner == 2, "a node at/below the negative threshold flips to team 1's ownership");
-}
-
-static void test_tree_capture_weight_offsets_two_non_tree_enemies(void) {
-    /* One Tree (Root Network doubles its weight to 2) vs two ordinary
-       enemy heroes (weight 1 each = 2 total) at the same node -- a tied
-       contest should decay toward neutral, not swing to team 1, proving
-       the doubling actually took effect (without it, this would be a
-       1-vs-2 mismatch that swings negative). */
-    arena_init_teams();
-    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
-    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
-    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
-    arena_state.heroes[ARENA_TEAM_SIZE + 1].active = 1;
-    arena_state.heroes[ARENA_TEAM_SIZE + 1].alive = 1;
-    arena_state.heroes[1].active = 0;
-
-    arena_state.heroes[0].hero_id = ARENA_HERO_TREE;
-    arena_state.heroes[0].x = arena_state.nodes[0].x; arena_state.heroes[0].z = arena_state.nodes[0].z;
-    arena_state.heroes[ARENA_TEAM_SIZE].x = arena_state.nodes[0].x;
-    arena_state.heroes[ARENA_TEAM_SIZE].z = arena_state.nodes[0].z;
-    arena_state.heroes[ARENA_TEAM_SIZE + 1].x = arena_state.nodes[0].x;
-    arena_state.heroes[ARENA_TEAM_SIZE + 1].z = arena_state.nodes[0].z;
-
-    arena_tick_nodes(1000);
-
-    CHECK(arena_state.nodes[0].pressure == 0.0f,
-          "Root Network: one Tree's doubled weight ties two non-Tree enemies -- pressure stays neutral");
-}
-
-static void test_flamel_marks_node_and_mark_decays_after_leaving(void) {
-    arena_init_teams();
-    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
-    arena_state.heroes[0].hero_id = ARENA_HERO_FLAMEL;
+    arena_state.nodes[0].owner = 2;
     arena_state.heroes[0].x = arena_state.nodes[0].x;
     arena_state.heroes[0].z = arena_state.nodes[0].z;
 
     arena_tick_nodes(16);
-    CHECK(arena_state.nodes[0].marked_by_team == 0 && arena_state.nodes[0].mark_ms_remaining == ARENA_FLAMEL_MARK_MS,
-          "Overgrowth: Flamel standing in radius marks the node for his team");
 
-    arena_state.heroes[0].x = 1000.0f; arena_state.heroes[0].z = 1000.0f;
-    arena_tick_nodes(1000);
-    CHECK(arena_state.nodes[0].marked_by_team == 0 && arena_state.nodes[0].mark_ms_remaining < ARENA_FLAMEL_MARK_MS,
-          "the mark decays once Flamel leaves, rather than clearing instantly");
-
-    arena_tick_nodes(ARENA_FLAMEL_MARK_MS);
-    CHECK(arena_state.nodes[0].marked_by_team == -1, "the mark fully clears once its decay window elapses");
+    CHECK(arena_state.nodes[0].owner == 0,
+          "a node flips to neutral the instant a lone team begins channeling it, before the channel finishes");
+    CHECK(arena_state.nodes[0].capturing_team == 0, "the channel is now attributed to the team that started it");
 }
 
-static void test_pizza_corruption_pulls_faster_than_baseline_decay(void) {
+static void test_node_channel_completes_to_capturing_team(void) {
     arena_init_teams();
-    for (int i = 0; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
-    arena_state.nodes[0].pressure = 30.0f;
-    arena_tick_nodes(1000);
-    float baseline_pressure = arena_state.nodes[0].pressure;
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
 
+    arena_tick_nodes(ARENA_NODE_CAPTURE_CHANNEL_MS - 1);
+    CHECK(arena_state.nodes[0].owner == 0, "the node is still neutral one tick before the channel completes");
+
+    arena_tick_nodes(1);
+    CHECK(arena_state.nodes[0].owner == 1, "the node flips to the channeling team's ownership once the channel completes");
+    CHECK(arena_state.nodes[0].capturing_team == -1, "the channel clears once it completes, ready for the next contest");
+}
+
+static void test_node_channel_interrupted_by_mixed_presence_loses_all_progress(void) {
+    /* Team 0 channels alone for a while, then an enemy shows up --
+       "interruptable": progress is lost entirely, and since the node had
+       already flipped neutral, it STAYS neutral rather than reverting to
+       whatever it was before -- the actual teeth behind "losing due to
+       ignoring the objective." */
     arena_init_teams();
     for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
     arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
     arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
     arena_state.heroes[1].active = 0;
-    arena_state.heroes[0].hero_id = ARENA_HERO_PIZZA;
-    arena_state.heroes[0].x = arena_state.nodes[0].x; arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+
+    arena_tick_nodes(ARENA_NODE_CAPTURE_CHANNEL_MS / 2);
+    CHECK(arena_state.nodes[0].capture_progress_ms > 0, "the channel has real progress partway through");
+
     arena_state.heroes[ARENA_TEAM_SIZE].x = arena_state.nodes[0].x;
     arena_state.heroes[ARENA_TEAM_SIZE].z = arena_state.nodes[0].z;
-    arena_state.nodes[0].pressure = 30.0f;
-    arena_tick_nodes(1000);
-    float pizza_pressure = arena_state.nodes[0].pressure;
+    arena_tick_nodes(16);
 
-    CHECK(pizza_pressure < baseline_pressure,
-          "Uninvestigated Fire: Pizza's corruption pull decays a tied-contest node faster than plain decay alone");
+    CHECK(arena_state.nodes[0].capturing_team == -1, "an enemy showing up interrupts the channel");
+    CHECK(arena_state.nodes[0].capture_progress_ms == 0, "all progress is lost on interrupt, not preserved");
+    CHECK(arena_state.nodes[0].owner == 0,
+          "the node stays neutral after an interrupt -- it is not handed back to the original owner for free");
+}
+
+static void test_node_channel_interrupted_when_capturing_team_leaves(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+
+    arena_tick_nodes(ARENA_NODE_CAPTURE_CHANNEL_MS / 2);
+    CHECK(arena_state.nodes[0].capturing_team == 0, "team 0 is channeling");
+
+    arena_state.heroes[0].x = 1000.0f; arena_state.heroes[0].z = 1000.0f;
+    arena_tick_nodes(16);
+
+    CHECK(arena_state.nodes[0].capturing_team == -1, "the channel is interrupted once the channeling team leaves");
+    CHECK(arena_state.nodes[0].capture_progress_ms == 0, "leaving loses all progress, same as being contested");
+}
+
+static void test_node_already_owned_by_present_team_has_no_channel(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.nodes[0].owner = 1; /* already team 0's -- standing on your own node shouldn't spin up a channel */
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+
+    arena_tick_nodes(16);
+
+    CHECK(arena_state.nodes[0].capturing_team == -1, "no channel runs on a node the present team already owns");
+    CHECK(arena_state.nodes[0].owner == 1, "owner is unchanged since there was nothing to capture");
+}
+
+static void test_tree_doubles_channel_speed(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_TREE;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+
+    arena_tick_nodes(1000);
+
+    CHECK(arena_state.nodes[0].capture_progress_ms == (int)(1000.0f * ARENA_TREE_CHANNEL_SPEED_MULT),
+          "Root Network: a Tree on the channeling team doubles capture progress this tick");
+}
+
+static void test_flamel_mark_speeds_up_channel_on_marked_ground(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.nodes[0].marked_by_team = 0;
+
+    arena_tick_nodes(1000);
+
+    CHECK(arena_state.nodes[0].capture_progress_ms == 1000 + ARENA_FLAMEL_MARK_CHANNEL_BONUS_MS,
+          "Overgrowth: capturing on ground marked by the capturing team's own Flamel finishes faster");
+}
+
+static void test_pizza_corrupts_any_channel_regardless_of_side(void) {
+    /* A Pizza on the SAME team as the sole capturer still corrupts the
+       attempt -- corruption doesn't pick a side, matching the doc's
+       original "regardless of team composition" framing. */
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+
+    arena_tick_nodes(1000);
+    CHECK(arena_state.nodes[0].capturing_team == 0, "team 0 channels normally with no Pizza around");
+
+    arena_state.heroes[0].hero_id = ARENA_HERO_PIZZA;
+    arena_tick_nodes(16);
+
+    CHECK(arena_state.nodes[0].capturing_team == -1,
+          "a Pizza's presence corrupts the channel even on her own team's attempt");
 }
 
 static void test_tree_q_roots_and_damages_in_range(void) {
@@ -1385,6 +1410,242 @@ static void test_courier_r_out_of_range_whiffs(void) {
           "The Debt Collector's Due whiffs out of range -- cooldown is not consumed");
 }
 
+/* S170-51: territorial dynamic jungle creeps. */
+
+static void test_creep_spawns_on_first_tick_with_flavor_from_node_owner(void) {
+    arena_init_teams();
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.nodes[0].owner = 1; /* team 0's */
+    arena_state.nodes[1].owner = 0; /* neutral/contested */
+
+    arena_tick_creeps(16);
+
+    CHECK(arena_state.creeps[0].alive, "a creep spawns on the very first tick of a match");
+    CHECK(arena_state.creeps[0].flavor == ARENA_CREEP_TEAM0 && arena_state.creeps[0].hp == ARENA_CREEP_TEAM_HP,
+          "a creep on a team-owned node spawns as that team's flavor, at the weaker team HP");
+    CHECK(arena_state.creeps[1].flavor == ARENA_CREEP_NEUTRAL && arena_state.creeps[1].hp == ARENA_CREEP_NEUTRAL_HP,
+          "a creep on a contested node spawns as the tougher neutral flavor");
+}
+
+static void test_creep_attacks_nearby_hero(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.heroes[0].hp = arena_state.heroes[0].max_hp = 100;
+
+    arena_tick_creeps(16); /* spawn */
+    arena_tick_creeps(ARENA_CREEP_ATTACK_COOLDOWN_MS); /* long enough for one attack */
+
+    CHECK(arena_state.heroes[0].hp == 100 - ARENA_CREEP_DAMAGE,
+          "a jungle creep auto-attacks a hero standing within its aggro radius");
+}
+
+static void test_hero_does_not_attack_creep_while_an_enemy_hero_is_in_range(void) {
+    /* Creeps are a secondary objective -- a hero already trading blows with
+       an enemy hero shouldn't split attention onto a nearby creep too. */
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = arena_state.nodes[0].x + 1.0f; /* within ARENA_ATTACK_RANGE */
+    arena_state.heroes[ARENA_TEAM_SIZE].z = arena_state.nodes[0].z;
+
+    arena_tick_creeps(16); /* spawn */
+    int hp_before = arena_state.creeps[0].hp;
+    arena_hero_attack_creeps(16);
+
+    CHECK(arena_state.creeps[0].hp == hp_before,
+          "a hero with an enemy hero already in range does not also attack a nearby creep this tick");
+}
+
+static void test_hero_kills_creep_and_queues_correct_respawn_timer(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.nodes[0].owner = 1; /* team-flavored, so ARENA_CREEP_TEAM_RESPAWN_MS applies */
+
+    arena_tick_creeps(16); /* spawn */
+    arena_state.creeps[0].hp = ARENA_ATTACK_DAMAGE; /* one hit from death */
+    arena_hero_attack_creeps(16);
+
+    CHECK(!arena_state.creeps[0].alive, "the creep dies once its HP is reduced to 0");
+    CHECK(arena_state.creeps[0].respawn_ms_remaining == ARENA_CREEP_TEAM_RESPAWN_MS,
+          "a team-flavored creep queues the fast team respawn timer, not the slow neutral one");
+    CHECK(arena_state.creeps[0].last_attacked_by_owner == 0, "the killing hero is credited as the last attacker");
+}
+
+static void test_neutral_creep_kill_grants_capture_bonus_only_while_channeling(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.nodes[0].owner = 0; /* neutral -- ARENA_CREEP_NEUTRAL flavor */
+
+    arena_tick_creeps(16); /* spawn */
+    arena_state.creeps[0].hp = ARENA_ATTACK_DAMAGE;
+    arena_state.nodes[0].capturing_team = -1; /* not channeling right now */
+    arena_state.nodes[0].capture_progress_ms = 0;
+    arena_hero_attack_creeps(16);
+
+    CHECK(arena_state.nodes[0].capture_progress_ms == 0,
+          "killing the neutral creep grants no capture bonus if the killer's team isn't actually channeling that node");
+
+    arena_tick_creeps(16); /* respawn is queued, not immediate -- re-force it alive for the second half of this test */
+    arena_state.creeps[0].alive = 1;
+    arena_state.creeps[0].hp = ARENA_ATTACK_DAMAGE;
+    arena_state.creeps[0].flavor = ARENA_CREEP_NEUTRAL;
+    arena_state.heroes[0].attack_cooldown_ms = 0; /* the first kill above set this; nothing ticks it down outside the full update loop */
+    arena_state.nodes[0].capturing_team = 0;
+    arena_state.nodes[0].capture_progress_ms = 0;
+    arena_hero_attack_creeps(16);
+
+    CHECK(arena_state.nodes[0].capture_progress_ms == ARENA_CREEP_NEUTRAL_KILL_CAPTURE_BONUS_MS,
+          "killing the neutral creep while your team is channeling that node grants the big capture bonus");
+}
+
+static void test_team_creep_kill_by_owning_team_heals(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.nodes[0].owner = 1; /* team 0's own node */
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.heroes[0].hp = 50; arena_state.heroes[0].max_hp = 100;
+
+    arena_tick_creeps(16);
+    arena_state.creeps[0].hp = ARENA_ATTACK_DAMAGE;
+    arena_hero_attack_creeps(16);
+
+    CHECK(arena_state.heroes[0].hp == 50 + ARENA_CREEP_TEAM_KILL_HEAL,
+          "killing your own team's jungle creep on your own territory heals you (home-turf resupply)");
+}
+
+static void test_team_creep_kill_by_enemy_team_helps_flip_the_node(void) {
+    /* Team 1 farms team 0's own jungle creep while team 1 is mid-channel
+       trying to flip that node -- the counter-play tool against a
+       turtling opponent. */
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[1].active = 0;
+    arena_state.nodes[0].owner = 1; /* team 0's own node */
+    arena_state.heroes[ARENA_TEAM_SIZE].x = arena_state.nodes[0].x;
+    arena_state.heroes[ARENA_TEAM_SIZE].z = arena_state.nodes[0].z;
+    arena_state.heroes[ARENA_TEAM_SIZE].hp = arena_state.heroes[ARENA_TEAM_SIZE].max_hp = 100;
+
+    arena_tick_creeps(16);
+    arena_state.creeps[0].hp = ARENA_ATTACK_DAMAGE;
+    arena_state.nodes[0].capturing_team = 1; /* team 1 is trying to flip it */
+    arena_state.nodes[0].capture_progress_ms = 0;
+    arena_hero_attack_creeps(16);
+
+    CHECK(arena_state.heroes[ARENA_TEAM_SIZE].hp == 100, "the enemy killer gets no heal -- that reward is owning-team-only");
+    CHECK(arena_state.nodes[0].capture_progress_ms == ARENA_CREEP_TEAM_KILL_DENY_CAPTURE_BONUS_MS,
+          "farming the enemy's own jungle creep while channeling their node grants the deny capture bonus");
+}
+
+static void test_stealthed_hero_captures_undetected_through_a_crowd_of_visible_enemies(void) {
+    /* The archetypal WoW Arathi Basin moment, brought forward on purpose:
+       a stealthed capper (Frog's R, which the doc itself describes as
+       "vanishes... can't be targeted or seen") solo-caps a node while a
+       crowd of visible enemies stands right on top of it, none the wiser. */
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    for (int i = ARENA_TEAM_SIZE + 1; i < ARENA_TEAM_SIZE + 6; i++) {
+        arena_state.heroes[i].active = 1;
+        arena_state.heroes[i].alive = 1;
+        arena_state.heroes[i].x = arena_state.nodes[0].x;
+        arena_state.heroes[i].z = arena_state.nodes[0].z;
+    }
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = arena_state.nodes[0].x;
+    arena_state.heroes[ARENA_TEAM_SIZE].z = arena_state.nodes[0].z;
+    arena_state.heroes[1].active = 0;
+
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.heroes[0].intangible_ms = 5000; /* stealthed, e.g. mid-Frog's-R */
+
+    arena_tick_nodes(1000);
+
+    CHECK(arena_state.nodes[0].capturing_team == 0,
+          "a lone stealthed hero channels a node even with six visible enemies standing right on it");
+    CHECK(arena_state.nodes[0].capture_progress_ms > 0, "the undetected channel makes real progress, not just registering as attempted");
+}
+
+static void test_two_visible_teams_still_interrupt_normally_even_near_a_stealthed_ally(void) {
+    /* Guards against the stealth exception swallowing the ordinary
+       mixed-presence interrupt rule: if BOTH sides have a normal, visible
+       presence, it's a contest as usual regardless of a stealthed hero
+       loitering nearby. */
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = arena_state.nodes[0].x;
+    arena_state.heroes[ARENA_TEAM_SIZE].z = arena_state.nodes[0].z;
+
+    arena_state.heroes[0].x = arena_state.nodes[0].x; /* visible team-0 presence */
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.heroes[1].active = 1;
+    arena_state.heroes[1].alive = 1;
+    arena_state.heroes[1].x = arena_state.nodes[0].x; /* a stealthed team-0 ally, also present */
+    arena_state.heroes[1].z = arena_state.nodes[0].z;
+    arena_state.heroes[1].intangible_ms = 5000;
+
+    arena_tick_nodes(1000);
+
+    CHECK(arena_state.nodes[0].capturing_team == -1,
+          "a visible enemy still interrupts normally even when a stealthed ally is also present at the node");
+}
+
+static void test_starting_a_channel_breaks_the_capturer_stealth(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[ARENA_TEAM_SIZE].active = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].alive = 1;
+    arena_state.heroes[ARENA_TEAM_SIZE].x = arena_state.nodes[0].x;
+    arena_state.heroes[ARENA_TEAM_SIZE].z = arena_state.nodes[0].z;
+    arena_state.heroes[1].active = 0;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.heroes[0].intangible_ms = 5000; /* stealthed, sneaking in past the crowd */
+
+    arena_tick_nodes(16);
+
+    CHECK(arena_state.nodes[0].capturing_team == 0, "the sneak-capture starts undetected as before");
+    CHECK(arena_state.heroes[0].intangible_ms == 0,
+          "interacting with the flag breaks the capturer's own stealth the instant the channel starts, real Arathi Basin's own rule");
+}
+
+static void test_damage_to_channeling_team_interrupts_the_capture(void) {
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].x = arena_state.nodes[0].x;
+    arena_state.heroes[0].z = arena_state.nodes[0].z;
+    arena_state.heroes[0].hp = arena_state.heroes[0].max_hp = 100;
+
+    arena_tick_nodes(ARENA_NODE_CAPTURE_CHANNEL_MS / 2);
+    CHECK(arena_state.nodes[0].capturing_team == 0 && arena_state.nodes[0].capture_progress_ms > 0,
+          "the channel is progressing normally, undamaged");
+
+    /* apply_damage is static to arena_game.c and not linkable from here --
+       set the flag it sets directly, same as this file already sets other
+       status-effect fields (silenced_ms, rooted_ms, etc.) straight on the
+       struct for test setup rather than going through a cast function. */
+    arena_state.heroes[0].damaged_this_tick = 1;
+    arena_tick_nodes(16);
+
+    CHECK(arena_state.nodes[0].capturing_team == -1 && arena_state.nodes[0].capture_progress_ms == 0,
+          "taking damage interrupts the capture channel, same as real Arathi Basin's flag-channel pushback");
+}
+
 int main(void) {
     printf("RED GARDEN arena_game headless smoke test\n\n");
     test_movement_reaches_target();
@@ -1434,12 +1695,14 @@ int main(void) {
     test_doc_wheel_w_teleports_to_ally();
     test_doc_wheel_r_heals_allies_in_radius_only();
     test_doc_wheel_r_consumes_cooldown_even_with_zero_allies();
-    test_node_pressure_drifts_toward_team_with_more_presence();
-    test_node_pressure_decays_toward_neutral_when_uncontested();
-    test_node_owner_flips_at_threshold();
-    test_tree_capture_weight_offsets_two_non_tree_enemies();
-    test_flamel_marks_node_and_mark_decays_after_leaving();
-    test_pizza_corruption_pulls_faster_than_baseline_decay();
+    test_node_channel_starts_and_flips_node_neutral_immediately();
+    test_node_channel_completes_to_capturing_team();
+    test_node_channel_interrupted_by_mixed_presence_loses_all_progress();
+    test_node_channel_interrupted_when_capturing_team_leaves();
+    test_node_already_owned_by_present_team_has_no_channel();
+    test_tree_doubles_channel_speed();
+    test_flamel_mark_speeds_up_channel_on_marked_ground();
+    test_pizza_corrupts_any_channel_regardless_of_side();
     test_tree_q_roots_and_damages_in_range();
     test_tree_q_out_of_range_whiffs();
     test_tree_r_self_roots_grants_armor_and_heals();
@@ -1468,6 +1731,17 @@ int main(void) {
     test_courier_w_teleports_to_farther_node();
     test_courier_r_drains_life_from_nearest_enemy();
     test_courier_r_out_of_range_whiffs();
+    test_creep_spawns_on_first_tick_with_flavor_from_node_owner();
+    test_creep_attacks_nearby_hero();
+    test_hero_does_not_attack_creep_while_an_enemy_hero_is_in_range();
+    test_hero_kills_creep_and_queues_correct_respawn_timer();
+    test_neutral_creep_kill_grants_capture_bonus_only_while_channeling();
+    test_team_creep_kill_by_owning_team_heals();
+    test_team_creep_kill_by_enemy_team_helps_flip_the_node();
+    test_stealthed_hero_captures_undetected_through_a_crowd_of_visible_enemies();
+    test_two_visible_teams_still_interrupt_normally_even_near_a_stealthed_ally();
+    test_starting_a_channel_breaks_the_capturer_stealth();
+    test_damage_to_channeling_team_interrupts_the_capture();
     printf("\n%s\n", failures == 0 ? "ALL PASS" : "SOME FAILED");
     return failures == 0 ? 0 : 1;
 }

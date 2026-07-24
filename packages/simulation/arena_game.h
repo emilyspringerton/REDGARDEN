@@ -8,6 +8,51 @@
 #define ARENA_ATTACK_COOLDOWN_MS 700
 #define ARENA_NODE_COUNT 2
 
+/* Territorial dynamic jungle creeps (S170-51). Founder direction: territory
+ * is the macro/economy layer, objectives (the team-wipe win condition) are
+ * how the game is actually won, and gameplay should let territory control
+ * shape what jungle creeps emerge -- "controlling the flavor and cadence of
+ * the jungle helps create the meta to counter certain comps or play
+ * styles." One creep per node, tied to that node's `owner`, re-rolled on
+ * every respawn rather than fixed at map-init -- the jungle's own
+ * population reacts to who currently controls the ground under it, not a
+ * static camp table (matching the earlier NORTHSTAR §8 "alive and dynamic,
+ * not static camps" direction, now built rather than just specified).
+ * Numbers are the "beginner/danger-tier" spirit of GoblinFoxDragon's real
+ * mob archetypes (server/mob/hills.go: passive-until-attacked low-HP vs. a
+ * tougher, rarer high-value target), adapted rather than ported verbatim --
+ * GFD's mobs carry a full aggro-cone/leash-range system this arena's
+ * click-to-move model has no equivalent for; this keeps just the
+ * difficulty-tiering idea. Two flavors, two different rewards, not just
+ * two HP totals -- that's the actual "flavor" half of the ask:
+ *   - A CONTESTED node's creep (owner==0) is the rare, tanky, slow-respawn
+ *     prize -- killing it hands the killer's team a large one-time capture-
+ *     progress bonus toward THAT node, a real tempo swing worth fighting
+ *     over regardless of side.
+ *   - An OWNED node's creep is common, weak, fast-respawning -- a small
+ *     steady "home-turf resupply" heal when the OWNING team kills it (their
+ *     own jungle sustains them), but a smaller capture-progress kick toward
+ *     FLIPPING the node when the OPPOSING team kills it instead -- a real
+ *     counter-play tool against a team that's turtled onto a lot of
+ *     territory: you can whittle down their jungle advantage by farming it
+ *     out from under them, not just by fighting them directly. */
+typedef enum {
+    ARENA_CREEP_NEUTRAL = 0, /* mirrors node owner 0 exactly -- see ArenaCreep.node_index */
+    ARENA_CREEP_TEAM0 = 1,
+    ARENA_CREEP_TEAM1 = 2,
+} ArenaCreepFlavor;
+#define ARENA_MAX_CREEPS ARENA_NODE_COUNT /* one creep per node, index-matched */
+#define ARENA_CREEP_NEUTRAL_HP              80
+#define ARENA_CREEP_TEAM_HP                 40
+#define ARENA_CREEP_NEUTRAL_RESPAWN_MS       30000 /* the rare prize -- slow cadence */
+#define ARENA_CREEP_TEAM_RESPAWN_MS          12000 /* home-turf resupply -- fast cadence, rewards holding ground */
+#define ARENA_CREEP_AGGRO_RADIUS             4.0f  /* passive-until-approached, same spirit as GFD's Rabbit */
+#define ARENA_CREEP_DAMAGE                   6
+#define ARENA_CREEP_ATTACK_COOLDOWN_MS       1500
+#define ARENA_CREEP_NEUTRAL_KILL_CAPTURE_BONUS_MS 5000 /* big swing for winning the contested prize */
+#define ARENA_CREEP_TEAM_KILL_HEAL                20   /* home-turf resupply, owning team only */
+#define ARENA_CREEP_TEAM_KILL_DENY_CAPTURE_BONUS_MS 1500 /* counter-play: farming an enemy's own jungle creep helps flip their node */
+
 /* Team-scale arena (2026-07-24, NORTHSTAR §13 cont'd): the array grows from
  * 2 to ARENA_MAX_HEROES so a full 10v10 match fits in the same ArenaState
  * the 1v1 local demo and apps/arena_server (1v1) already use. The 1v1 path
@@ -117,32 +162,58 @@ typedef enum {
 #define ARENA_DOC_WHEEL_R_HEAL        20   /* teamwide heal (R, simplified from a shield) */
 #define ARENA_DOC_WHEEL_R_COOLDOWN_MS 30000
 
-/* Territory / node system (S170-46, NORTHSTAR §13 cont'd) -- the founder's
- * "territory/resource economy" pick over allies-scaling or non-piloted
- * units. Extends the two vestigial, gameplay-inert ArenaNode markers
- * (previously rendered-only, apps/arena/src/main.c) into a real capture
- * contest: each node accumulates signed `pressure` from weighted nearby
- * team presence, and `owner` derives from pressure crossing a threshold.
+/* Territory / node system (S170-46, NORTHSTAR §13 cont'd; redesigned
+ * S170-50). The founder's original "territory/resource economy" pick over
+ * allies-scaling or non-piloted units, then explicitly redirected away from
+ * ambient presence-math toward a real Arathi Basin-style flag: "true click
+ * to channel capture, interruptable, a neutral period after the flag flips
+ * as you wait for it to finish capturing -- adds objective-focused play and
+ * the possibility of losing due to ignoring the objective, not just
+ * presence-based." The old model (signed `pressure` drifting toward
+ * whichever team had more weighted bodies nearby, owner derived from a
+ * threshold) is gone entirely, not layered under this -- it was exactly
+ * the "just presence based" thing being moved away from.
+ *
+ * New model: exactly one team can be channeling a node at a time.
+ *   - Exclusive presence (only team A's living heroes in radius, zero from
+ *     team B) starts or continues team A's channel.
+ *   - The instant a channel starts against a node NOT already owned by the
+ *     channeling team, the node flips to neutral (owner=0) immediately --
+ *     this is the "neutral period... as you wait for it to finish
+ *     capturing": the node sits open, genuinely uncaptured, for the whole
+ *     channel duration, not just at the end.
+ *   - Mixed presence (both teams in radius) or the channeling team fully
+ *     leaving interrupts the channel: progress resets to 0, capturing_team
+ *     clears. The node does NOT revert to its pre-channel owner -- a
+ *     defender who interrupts an attacker still has to walk over and start
+ *     their own channel to reclaim it. This is the actual teeth behind
+ *     "the possibility of losing due to ignoring the objective": leaving a
+ *     flag undefended costs it the instant the enemy commits, and even a
+ *     successful defense doesn't hand it back for free.
+ *   - Reaching ARENA_NODE_CAPTURE_CHANNEL_MS flips owner to the channeling
+ *     team and clears the channel state.
+ *
  * This is the enabling system for Tree (Root Network), Pizza (corruption),
  * and Flamel (Overgrowth marking, absorbed from the former Druid) -- the
- * three heroes S170-32's roster audit flagged as blocked on exactly this. */
-#define ARENA_NODE_CAPTURE_RADIUS     5.0f
-#define ARENA_NODE_PRESSURE_RATE      8.0f  /* pressure/sec toward the team with more weighted presence */
-#define ARENA_NODE_DECAY_RATE         4.0f  /* pressure/sec drift toward neutral when tied/uncontested */
-#define ARENA_NODE_OWNER_THRESHOLD    50.0f /* |pressure| >= this crosses from contested (0) to owned (1/2) */
-#define ARENA_TREE_CAPTURE_WEIGHT     2     /* Root Network: Tree counts double for capture pull while standing still or not */
-#define ARENA_FLAMEL_MARK_MS          6000  /* Overgrowth: how long a mark persists once Flamel leaves */
-#define ARENA_FLAMEL_MARK_BONUS_RATE  6.0f  /* extra pressure/sec pull toward the marking team on a marked-but-still-neutral node -- deterministic simplification of the doc's "increased chance of converting," flagged */
-#define ARENA_PIZZA_CORRUPT_PULL_RATE 5.0f  /* Uninvestigated Fire: while a Pizza (either team) stands in radius, pulls pressure toward neutral regardless of team composition -- simplification of the doc's true 4-state CORRUPTED concept, flagged */
+ * three heroes S170-32's roster audit flagged as blocked on exactly this;
+ * all three are redesigned below to hook into the channel instead of the
+ * retired pressure-drift. */
+#define ARENA_NODE_CAPTURE_RADIUS        5.0f
+#define ARENA_NODE_CAPTURE_CHANNEL_MS    8000  /* base channel duration, no bonuses -- Arathi Basin's own real cap timer is in this ballpark */
+#define ARENA_TREE_CHANNEL_SPEED_MULT    2.0f  /* Root Network: a Tree among the channeling team's present heroes doubles progress this tick */
+#define ARENA_FLAMEL_MARK_MS             6000  /* Overgrowth: how long a mark persists once Flamel leaves */
+#define ARENA_FLAMEL_MARK_CHANNEL_BONUS_MS 200 /* extra channel progress per tick while capturing on ground the capturing team has marked -- deterministic simplification of the doc's "increased chance of converting," flagged */
 
 /* Tree — sixth hero kit (S170-46). Passive (Root Network) needs no ability
  * code at all -- arena_tick_nodes reads hero_id directly and applies
- * ARENA_TREE_CAPTURE_WEIGHT. Q (Vine Lash) simplifies "AoE root in a cone
- * in front" to an instant hit-if-in-range check, same precedent as Ghost's
- * Alien Frequency. W (Untranslated, ally CC-immunity) is unbuildable --
- * arena has no interrupt/channel mechanic at all, every cast is instant --
- * skipped, flagged, same reasoning as other mechanic-less passives. R
- * (Grand Secret) simplifies "roots permanently until recast, min 8s" to a
+ * ARENA_TREE_CHANNEL_SPEED_MULT. Q (Vine Lash) simplifies "AoE root in a
+ * cone in front" to an instant hit-if-in-range check, same precedent as
+ * Ghost's Alien Frequency. W (Untranslated, ally CC-immunity) is
+ * unbuildable -- arena's own ability casts are all instant, nothing to
+ * interrupt there -- skipped, flagged, same reasoning as other
+ * mechanic-less passives (the node *capture* channel added by S170-50 is a
+ * map-objective mechanic, a different thing from an ability-cast channel).
+ * R (Grand Secret) simplifies "roots permanently until recast, min 8s" to a
  * fixed-duration self-root + armor buff, same "fixed duration" simplification
  * already used for Frog's R and Ghost's R zone. */
 #define ARENA_TREE_Q_RANGE         6.0f
@@ -154,17 +225,23 @@ typedef enum {
 #define ARENA_TREE_R_HEAL          30
 #define ARENA_TREE_R_COOLDOWN_MS   25000
 
-/* Pizza — seventh hero kit (S170-46). Passive (Uninvestigated Fire) is an
- * always-on burn aura (AP-scaling simplified to flat DPS, same precedent as
- * Ghost's flat R_DPS) plus the node-corruption pull handled generically in
- * arena_tick_nodes. Q (Nobody Checked) simplifies "throw a burning slice +
- * ground patch" to direct damage + a burn DoT applied straight to the foe --
- * no persistent ground-hazard system exists, so the lingering-patch half is
- * dropped, not faked. W (I Am The Chosen One) is pure-visual, zero mechanical
- * effect per the doc itself -- skipped, flagged, same reasoning as Duck's W
- * and Ghost's passive. R (Nobody Ever Checks) is built for real: a damage
- * floor status effect, the one piece of this roster's simplifications that
- * needed apply_damage() centralized rather than shortcut. */
+/* Pizza — seventh hero kit (S170-46, corruption redesigned S170-50). Passive
+ * (Uninvestigated Fire) is an always-on burn aura (AP-scaling simplified to
+ * flat DPS, same precedent as Ghost's flat R_DPS) plus a corruption effect
+ * on the channel-capture mechanic, handled generically in arena_tick_nodes:
+ * Pizza's mere presence in radius forces any in-progress channel on that
+ * node to interrupt, regardless of which team she's on or whether her
+ * presence would otherwise count as "exclusive" -- corruption doesn't care
+ * whose side you're on, a direct carry-over of the same "regardless of team
+ * composition" framing from the old pressure model. Q (Nobody Checked)
+ * simplifies "throw a burning slice + ground patch" to direct damage + a
+ * burn DoT applied straight to the foe -- no persistent ground-hazard
+ * system exists, so the lingering-patch half is dropped, not faked. W (I Am
+ * The Chosen One) is pure-visual, zero mechanical effect per the doc
+ * itself -- skipped, flagged, same reasoning as Duck's W and Ghost's
+ * passive. R (Nobody Ever Checks) is built for real: a damage floor status
+ * effect, the one piece of this roster's simplifications that needed
+ * apply_damage() centralized rather than shortcut. */
 #define ARENA_PIZZA_AURA_RADIUS    3.5f
 #define ARENA_PIZZA_AURA_DPS       4
 #define ARENA_PIZZA_Q_RANGE        6.0f
@@ -332,6 +409,16 @@ typedef struct {
      * fixed-interval accumulator for a passive that ticks independently of
      * any cast, distinct from r_zone_tick_ms (which is cast-scoped). */
     int aura_tick_ms;
+    /* damaged_this_tick (S170-51 cont'd): set by apply_damage() on ANY hit
+     * from ANY source (melee, ability, creep, burn tick -- matching real
+     * WoW Arathi Basin's "any damage interrupts your capture channel"),
+     * read and cleared once per tick by arena_tick_nodes. A simplification
+     * of the real mechanic's "the specific channeling character" down to
+     * "any hero of the channeling team gets hit interrupts the team's
+     * channel" -- this arena tracks capture channels per-team, not per-
+     * individual-capturing-hero, flagged here rather than silently
+     * narrowed. */
+    int damaged_this_tick;
     /* next_cast_refund: generic ally-buff flag (S170-45, Frog's Borrowed
      * Time places this on an ally, not itself) -- the next successful Q/W/R
      * cast by whoever carries this flag has its cooldown refunded to 0
@@ -353,20 +440,34 @@ typedef struct {
 
 typedef struct {
     float x, z;
-    /* pressure/owner/marked_* (S170-46): the territory contest state.
-     * pressure ranges -100..100 (positive = team 0-leaning, negative =
-     * team 1-leaning); owner derives from pressure crossing
-     * ARENA_NODE_OWNER_THRESHOLD, recomputed every tick by
-     * arena_tick_nodes -- not set directly anywhere else. */
-    float pressure;
-    int owner;           /* 0 = neutral/contested, 1 = team 0, 2 = team 1 */
+    /* owner, capturing_team, capture_progress_ms, marked_by_team (S170-46,
+     * capture mechanic redesigned S170-50): the territory contest state,
+     * all recomputed every tick by arena_tick_nodes -- not set directly
+     * anywhere else except test setup. */
+    int owner;              /* 0 = neutral/contested, 1 = team 0, 2 = team 1 */
+    int capturing_team;     /* -1 = no active channel, else 0/1: which team is currently channeling this node */
+    int capture_progress_ms; /* 0..ARENA_NODE_CAPTURE_CHANNEL_MS (plus bonuses); resets to 0 on interrupt or on completion */
     int marked_by_team;  /* -1 = unmarked, else team index (Flamel's Overgrowth, absorbed from Druid) */
     int mark_ms_remaining;
 } ArenaNode;
 
+/* ArenaCreep (S170-51): one jungle creep per node, index-matched
+ * (creeps[i] always belongs to nodes[i]). See the header comment above
+ * ARENA_MAX_CREEPS for the full design. */
+typedef struct {
+    float x, z;
+    int hp, max_hp;
+    int alive;
+    ArenaCreepFlavor flavor;
+    int attack_cooldown_ms;
+    int respawn_ms_remaining; /* only meaningful while !alive */
+    int last_attacked_by_owner; /* -1 = never hit since spawning, else the owner index of whoever last damaged it -- who gets credit on the kill */
+} ArenaCreep;
+
 typedef struct {
     ArenaHero heroes[ARENA_MAX_HEROES];
     ArenaNode nodes[ARENA_NODE_COUNT];
+    ArenaCreep creeps[ARENA_MAX_CREEPS];
     int winner; /* 0 = none yet, 1 = player/team 0, 2 = bot/team 1 */
 } ArenaState;
 
@@ -411,14 +512,39 @@ ArenaHero *arena_nearest_enemy(int owner);
  * must already be NULL-safe the same way they are for arena_nearest_enemy. */
 ArenaHero *arena_nearest_ally(int owner);
 
-/* arena_tick_nodes (S170-46): advances the territory contest for every
- * ArenaNode by dt_ms -- weighted team presence within
- * ARENA_NODE_CAPTURE_RADIUS drifts pressure, Flamel's Overgrowth mark
- * decays/refreshes, Pizza's corruption pulls toward neutral. Called from
- * both arena_update() (1v1, nodes[] already positioned) and
- * arena_update_teams(), same "generalizes cleanly, no special-casing"
- * precedent as arena_nearest_ally/arena_nearest_enemy. */
+/* arena_tick_nodes (S170-46, capture mechanic redesigned S170-50): advances
+ * the Arathi Basin-style channel capture for every ArenaNode by dt_ms --
+ * exclusive single-team presence within ARENA_NODE_CAPTURE_RADIUS starts or
+ * continues that team's channel (flipping an enemy-owned node to neutral
+ * immediately, not just on completion); mixed presence, a Pizza's
+ * corruption, or the channeling team leaving interrupts it (progress lost,
+ * owner unchanged -- no free revert); Flamel's Overgrowth mark
+ * decays/refreshes and grants a channel-speed bonus on the marking team's
+ * own capture. Called from both arena_update() (1v1, nodes[] already
+ * positioned) and arena_update_teams(), same "generalizes cleanly, no
+ * special-casing" precedent as arena_nearest_ally/arena_nearest_enemy. */
 void arena_tick_nodes(unsigned int dt_ms);
+
+/* arena_tick_creeps (S170-51): advances every jungle creep by dt_ms --
+ * respawns a dead creep once its timer elapses (re-rolling flavor/HP from
+ * its node's CURRENT owner, not whatever it was when it last spawned),
+ * ticks its attack cooldown, and has it auto-attack the nearest hittable
+ * hero within ARENA_CREEP_AGGRO_RADIUS if one's there (passive-until-
+ * approached). Does not itself apply any hero-side damage to the creep or
+ * grant kill rewards -- that's arena_hero_attack_creeps, called
+ * separately so both halves of creep combat can be reasoned about
+ * independently. Called from both arena_update() and arena_update_teams(). */
+void arena_tick_creeps(unsigned int dt_ms);
+
+/* arena_hero_attack_creeps (S170-51): each active, alive hero without a
+ * closer enemy HERO in range instead auto-attacks a living creep within
+ * ARENA_ATTACK_RANGE if one's there -- creeps are a secondary objective,
+ * so a hero already trading blows with an enemy hero doesn't get split
+ * attention. On a kill, applies the flavor-specific reward (see the
+ * ARENA_MAX_CREEPS header comment) to the killer's team. Called from both
+ * arena_update() and arena_update_teams(), after resolve_combat/the melee
+ * loop so hero-vs-hero combat is always resolved first each tick. */
+void arena_hero_attack_creeps(unsigned int dt_ms);
 
 /* Kit casts dispatch on the hero's hero_id, not a hardcoded owner check
  * (S170-31 generalized this from S170-18's Unicorn-only version). No-ops
