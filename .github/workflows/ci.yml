@@ -81,7 +81,16 @@ jobs:
           # which connects to the persistent bot pool on the real box
           # (S170-59, found live: a real download hung on "queuing" because
           # of exactly this). Update this IP if the box's address changes.
-          printf '%s\r\n' "@echo off" "echo Connecting to the persistent bot pool at 198.58.107.85 ..." "RedGarden.exe --queue 198.58.107.85" > RedGarden_Client/PLAY.bat
+          #
+          # S170-63, also found live: there's no human login flow yet, so
+          # the client falls back to self-minting a connect ticket via
+          # REDGARDEN_TICKET_SECRET -- which has to be set client-side too,
+          # or it fails at the ticket step with no visible error (no
+          # `pause`, the window just closed). This is a shared *test*
+          # secret for exactly this kind of validation, not a real production
+          # credential -- matches what the live bot pool's matchmaker/
+          # arena_server processes are run with.
+          printf '%s\r\n' "@echo off" "set REDGARDEN_TICKET_SECRET=test-secret-for-vs0-vs1-validation" "echo Connecting to the persistent bot pool at 198.58.107.85 ..." "RedGarden.exe --queue 198.58.107.85" "pause" > RedGarden_Client/PLAY.bat
           zip -r "RedGarden_Client_${BUILD}.zip" RedGarden_Client
 
           mkdir -p RedGarden_Server

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-07-24 (27)
+
+- fix(ops+ci): matchmakers had died (bots orphaned, queue packets going nowhere) and `PLAY.bat`
+  never set `REDGARDEN_TICKET_SECRET`, so even after restarting the matchmakers the client failed
+  silently at the ticket-mint step -- no human login flow exists yet, so `--queue` falls back to
+  self-minting via that env var, which has to be set client-side too (S170-63, found live while
+  a founder was actually trying to connect). Restarted both matchmaker pools with the shared test
+  secret the live bot pool already uses. Fixed `PLAY.bat` to set the same secret before launching
+  and added `pause` so a failure is actually readable instead of the window closing before the
+  error prints. Also: briefly misdiagnosed this as an IDUNA-vs-server ticket-signing-secret
+  mismatch (real, but irrelevant to the self-mint path actually in use here) and accidentally
+  spawned one broken test bot mid-investigation that spammed the pool with failed
+  connect/requeue cycles -- corrected, orphans cleaned up.
+
 ## 2026-07-24 (26)
 
 - fix(ci): `PLAY.bat`'s hardcoded `127.0.0.1` was wrong for the actual distributed client
