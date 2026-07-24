@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-07-24 (25)
+
+- CI green end to end (S170-54 closed): confirmed via the GitHub Actions API (no `gh` CLI on this
+  box, public API works without a token for a public repo) that commit `276614c`'s run passed
+  every step -- headless tests, the bot-pool soak test, Linux server-side build, Linux arena
+  client build, the mingw-w64 install, the Windows cross-compile, artifact bundling, and upload.
+  `red-garden-build` now contains a real `RedGarden_Client_*.zip` (Windows .exe + SDL2.dll +
+  PLAY.bat) and `RedGarden_Server_*.zip` (Linux server-side binaries), matching what a founder
+  actually asked for: "the github artifact for REDGARDEN is unsuitable... no executable... SDL
+  dll not bundled... check shankpit for the protopattern."
+
 ## 2026-07-24 (24)
 
 - fix(arena): the actual root cause of the Windows build failure, found by locally reproducing
