@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-07-24 (26)
+
+- fix(ci): `PLAY.bat`'s hardcoded `127.0.0.1` was wrong for the actual distributed client
+  (S170-59). Found live: a founder actually downloaded and ran the CI-built Windows client, and
+  it hung "queuing for a match" at `127.0.0.1:7778` -- loopback, which only makes sense if the
+  matchmaker is running on that same Windows machine. Fixed `PLAY.bat` to point at this box's
+  real address (`198.58.107.85`) and print what it's connecting to before launching, instead of
+  a silent `start` that gave no feedback about which server it was even trying to reach.
+
 ## 2026-07-24 (25)
 
 - CI green end to end (S170-54 closed): confirmed via the GitHub Actions API (no `gh` CLI on this

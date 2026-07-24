@@ -75,7 +75,13 @@ jobs:
           mkdir -p RedGarden_Client
           cp RedGarden.exe RedGarden_Client/
           cp sdl2_mingw/bin/SDL2.dll RedGarden_Client/
-          printf '%s\n' "start RedGarden.exe --queue 127.0.0.1" > RedGarden_Client/PLAY.bat
+          # 127.0.0.1 (loopback) was the original default here, which only
+          # ever makes sense if the matchmaker is running on this same
+          # Windows machine -- wrong for the actual distributed client,
+          # which connects to the persistent bot pool on the real box
+          # (S170-59, found live: a real download hung on "queuing" because
+          # of exactly this). Update this IP if the box's address changes.
+          printf '%s\r\n' "@echo off" "echo Connecting to the persistent bot pool at 198.58.107.85 ..." "RedGarden.exe --queue 198.58.107.85" > RedGarden_Client/PLAY.bat
           zip -r "RedGarden_Client_${BUILD}.zip" RedGarden_Client
 
           mkdir -p RedGarden_Server
