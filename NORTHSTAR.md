@@ -387,10 +387,23 @@ connected through the real matchmaker, and the match log shows real WOTAN identi
 afterward (10 bots, 5 matches, self-mint fallback path since that script doesn't set the IDUNA env
 vars) — confirms the change is backward compatible, not just additive in isolation.
 
-**Still not done — `apps/server` reporting match results at match end.** The server has everything
-it needs now (real per-client `player_id`s captured at connect, the game-result endpoint exists),
-but wiring `match_end` to actually call it is separate, deliberately-deferred work, not silently
-folded into this pass.
+**Done — `apps/server` now reports match results at match end, 2026-07-24 (S170-41 cont'd).**
+`report_match_result()` runs once, right where `match_log_win` already fires: agent-logs in, then
+posts `win`/`loss` to `/api/v1/redgarden/game-result` for each connected client's real `player_id`
+(formatted from the captured 16 raw bytes into the canonical dashed UUID string IDUNA's Go side
+parses). No-op if IDUNA isn't configured; best-effort otherwise, so a WOTAN reporting hiccup can
+never crash or hang a live match. Verified live end-to-end, not just in isolation: ran a real
+2-bot match to natural completion (`match_winner` resolved from actual card-RTS play, not forced),
+confirmed the match log's `match_end` winner matched the public leaderboard afterward exactly —
+the winner's `wins` incremented, the loser's `losses` incremented, both keyed to their real,
+persistent WOTAN identities. `scripts/test_10_bots.sh` and `scripts/test_arena.sh` both re-verified
+clean afterward.
+
+Known, accepted gap: clients using the self-minted fallback ticket (IDUNA not configured for that
+bot) report results under 16 pseudo-random bytes reformatted as a UUID-shaped string that doesn't
+match any real `players` row — harmless, since the leaderboard's `INNER JOIN players` naturally
+filters those rows out; flagged in `report_match_result`'s own doc comment rather than silently
+left unexplained.
 
 **Phase B — Replay logging. Started 2026-07-24 (S170-28).** Extends §10's already-specified
 minimum hook (`red_garden_server` per-match `var/matches/<port>-<timestamp>.jsonl` event log) to

@@ -38,12 +38,11 @@ static unsigned char client_player_id[MAX_CLIENTS][16];
 static int client_has_player_id[MAX_CLIENTS];
 
 // IDUNA agent config — same env vars / parsing as shankpit-460's
-// apps/server/src/main.c (S156-04), ported here for S170-26. Not yet used
-// to report match results: REDGARDEN's match_winner (win/loss, card-RTS) is
-// a different shape than shankpit-460's kills/deaths (FPS), and forcing one
-// into the other's IDUNA schema would corrupt shared WOTAN profile
-// semantics. This pass only loads the config and exposes it for Phase B;
-// see the S170-26 backlog entry for the open schema question.
+// apps/server/src/main.c (S156-04), ported here for S170-26. Used by
+// report_match_result (S170-41) to post win/loss to IDUNA's genre-agnostic
+// player_game_stats table (redgarden.match.write) rather than shankpit-460's
+// FPS-shaped kills/deaths schema, which would have corrupted shared WOTAN
+// profile semantics if REDGARDEN's win/loss had been forced into it.
 static char iduna_host[128] = "127.0.0.1";
 static int iduna_port = 8080;
 static char iduna_agent_name[128] = "";
@@ -208,6 +207,67 @@ static void match_log_win(int winner) {
     fflush(match_log_fp);
 }
 
+// player_id_uuid_str formats a client's captured 16 raw player_id bytes as a
+// canonical UUID string (IDUNA's Go side does uuid.Parse on this, which
+// requires the dashed text form, not raw hex).
+static void player_id_uuid_str(int client_id, char out[37]) {
+    if (!client_has_player_id[client_id]) { out[0] = '\0'; return; }
+    const unsigned char *b = client_player_id[client_id];
+    snprintf(out, 37,
+             "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+             b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+             b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+}
+
+// report_match_result posts win/loss to IDUNA's /api/v1/redgarden/game-result
+// for each connected client (S170-41 -- the "still not done" piece flagged
+// in NORTHSTAR §12 Phase A). No-op if IDUNA isn't configured, matching the
+// existing honest-gap pattern elsewhere in this file. Best-effort: logs and
+// moves on if the HTTP call fails, since a WOTAN reporting hiccup should
+// never crash or hang a live match server.
+//
+// Known gap, not silently papered over: clients using the self-minted
+// fallback ticket (bot_main.c's mint_ticket, when IDUNA isn't configured for
+// the bot itself) carry 16 pseudo-random bytes here, not a real IDUNA
+// player_id -- reporting a result for one just creates an orphan
+// player_game_stats row with no matching players row. Harmless in practice:
+// the leaderboard query INNER JOINs against players, so orphan rows simply
+// never surface there. Not worth gating on here; flagged for awareness.
+static void report_match_result(int winner) {
+    if (!iduna_agent_configured) return;
+
+    char resp[2048];
+    int status = 0;
+    char login_body[512];
+    snprintf(login_body, sizeof(login_body),
+             "{\"agent_name\":\"%s\",\"agent_secret\":\"%s\"}",
+             iduna_agent_name, iduna_agent_secret);
+    if (http_post_json(iduna_host, iduna_port, "/api/v1/auth/agent", NULL,
+                        login_body, resp, sizeof(resp), &status) != 0 || status != 200) {
+        fprintf(stderr, "WOTAN: agent login failed, skipping match-result report (status=%d)\n", status);
+        return;
+    }
+    char token[2048];
+    if (!http_extract_json_string_field(resp, "access_token", token, sizeof(token))) {
+        fprintf(stderr, "WOTAN: agent login response missing access_token, skipping report\n");
+        return;
+    }
+
+    for (int owner = 1; owner <= 2; owner++) {
+        char pid[37];
+        player_id_uuid_str(owner, pid);
+        if (pid[0] == '\0') continue; // never connected / no player_id captured
+        const char *result = (owner == winner) ? "win" : "loss";
+        char body[256];
+        snprintf(body, sizeof(body),
+                 "{\"player_id\":\"%s\",\"game\":\"redgarden\",\"result\":\"%s\"}", pid, result);
+        if (http_post_json(iduna_host, iduna_port, "/api/v1/redgarden/game-result", token,
+                            body, resp, sizeof(resp), &status) != 0 || status != 200) {
+            fprintf(stderr, "WOTAN: game-result report failed for client %d (status=%d)\n", owner, status);
+        }
+    }
+}
+
 static unsigned int get_server_time(void) {
 #ifdef _WIN32
     return (unsigned int)GetTickCount();
@@ -360,6 +420,7 @@ int main(int argc, char *argv[]) {
         local_update(16);
         if (local_state.match_winner != 0 && !last_winner_logged) {
             match_log_win(local_state.match_winner);
+            report_match_result(local_state.match_winner);
             last_winner_logged = 1;
         }
         server_broadcast();
