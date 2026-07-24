@@ -759,3 +759,22 @@ stack with the secret actually exported fixed it immediately.)
 creation with no display (no Xvfb on this box, same limitation noted above) before it could send a
 draft pick or move — so no full match was played end-to-end visually. The *join* is proven; playing
 once joined still needs either a real display or Xvfb, unchanged from before.
+
+**S170-14 (2/3): the player-only pool, verified live.** Two of the three matchmaking pools the
+founder asked for (bot games, player-only, ranked) are now scoped: bot games was already S170-43's
+persistent pool; ranked stays explicitly undesigned (no rank model, MMR, or queue rules exist —
+not a code gap, a design gap). The player-only pool is now real: `scripts/launch_arena_pools.sh`
+stands up a **second, entirely separate matchmaker instance** on its own port (7779, `--lobby-size
+2`), with zero bots ever configured to queue into it — pool separation is operational (two
+processes, two ports), not a new access-control layer inside the matchmaker, matching this
+codebase's existing pattern of generalizing one binary via flags rather than building bespoke
+machinery per mode. Lobby size is 1v1, not 10v10 — with near-zero real concurrent human players
+today, a 10v10 player-only queue would never fill; 1v1 is the smallest already-verified real-PvP
+case (S170-42), the same "don't build for traffic that doesn't exist yet" reasoning as not running
+S24-05's load test without real traffic. **Verified live:** ran the bot pool (2 bots, `--lobby-size
+20`) and the player-only pool simultaneously; two real `red_garden_arena --queue` human clients
+matched into a genuine 1v1 on the player-only pool's own spawned server (port 7600), which logged
+`Lobby full (2 players) -- internal bot AI disabled, entering draft` — the standard 1v1 no-bot
+path. Cross-checked both directions: the player-only matchmaker's log shows only those two human
+connections, ever; grepping every bot's log for the player-only pool's ports (7779/7600) found
+nothing — confirmed clean isolation, not just assumed from the two ports being different.
