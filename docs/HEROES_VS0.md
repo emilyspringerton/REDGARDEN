@@ -309,6 +309,37 @@ interference on someone else's reading rather than a signal of his own.
 
 ---
 
+### Gary (TYLER `multiverse_heroes.md` #35, "Gary, Bifrost Security (Off-Duty)") — **Marksman** (S170-91)
+
+No magic — "extraordinary eyesight, extraordinary aim," and a job that never actually ends because
+someone always has to be watching the bridge. The one hero in this roster with no dash, no
+teleport, no gap-closer of any kind: Gary doesn't chase, he watches from where he's standing.
+
+- **Q — The Property**: a stationary long-range precision shot at the nearest enemy — no movement
+  at all, range-gated instead of a hit-radius-after-a-dash like most of the roster's Qs.
+- **W — Watching the Bridge**: a free toggle (no cooldown) that extends Q's own range while
+  active, rather than granting a stat bonus like every other toggle in this roster.
+- **R — "Slow Down, This Isn't a Track Meet"**: a fixed-duration root on the nearest enemy — the
+  same "slow simplified to a full stop" convention Tree's R/Flamel's R already use.
+
+---
+
+### Flute Debt (TYLER `multiverse_heroes.md` #42, "Han Xiangzi's Flute-Debt") — **DoT/Payoff** (S170-91)
+
+One of the Eight Immortals, patron of musicians — "owes something to every wrong note ever played
+near him, and eventually collects." The kit is a real debt mechanic, not a metaphor: apply it with
+Q, cash it in with R.
+
+- **Q — The Wrong Note**: modest immediate damage plus the shared `burning_ms`/`burn_dps` DoT
+  fields (Pizza's mechanic, S170-46) — the debt accruing.
+- **W — Recouping Interest**: a free toggle self-heal-over-time (same shape as Unicorn's regen) —
+  passively collecting even outside a fight.
+- **R — Eventually Collects**: always lands and consumes the cooldown, but deals real bonus damage
+  if the target still has the Q's debt active, base damage otherwise. The actual payoff of the
+  kit's theme — the debt has to still be open for it to collect big.
+
+---
+
 ## Starting Item Roster (VS0)
 
 LoL Season 3 is the explicit stylistic northstar here — not its item *names*, its item *stat-line

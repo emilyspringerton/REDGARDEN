@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-07-25 (1)
+
+- feat(arena): 13th/14th heroes, Gary and Flute Debt (S170-91). Founder: "add GARY to redgarden"
+  → "music" → "add flute debt" (read in context, not a separate audio request). Both already had
+  full lore entries, no new writing needed: Gary, Bifrost Security (Off-Duty)
+  (`multiverse_heroes.md` #35) and Han Xiangzi's Flute-Debt (#42). `ARENA_HERO_COUNT` 12→14.
+  Gary: a stationary marksman with no dash/teleport at all -- Q is a range-gated precision shot
+  (no movement), W is a free toggle that extends Q's own range rather than granting a stat, R is
+  a fixed-duration root ("slow down, this isn't a track meet"). Flute Debt: a real debt/payoff
+  mechanic -- Q applies the shared `burning_ms`/`burn_dps` DoT (Pizza's fields, S170-46) as "the
+  wrong note," W is a free-toggle self-heal, R always lands but deals real bonus damage only if
+  the Q debt is still active on the target ("eventually collects"), base damage otherwise. Wired
+  into every real call site: all three cast-dispatch switches, `tick_hero_kit`'s regen tick, bot
+  AI heuristics, both auto-draft pools (`% 12` → `% 14`), the server's pick-validation bound,
+  `arena_hero_name()`, `docs/HEROES_VS0.md`. Verified: `build.sh`, `build_arena.sh`,
+  `test_arena.sh`, `test_10_bots.sh`, and a local mingw cross-compile, all clean.
+
 ## 2026-07-24 (34)
 
 - fix(arena): "ENEMY" HUD readout was a hardcoded 1v1 assumption, broken in team mode (S170-86

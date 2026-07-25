@@ -79,8 +79,10 @@ typedef enum {
     ARENA_HERO_DAGDA = 9,
     ARENA_HERO_COURIER = 10, /* Ratatoskr, TYLER multiverse_heroes.md #32 */
     ARENA_HERO_LOKI = 11, /* TYLER multiverse_heroes.md #37, "Loki, Who Isn't Here" (S170-79) */
+    ARENA_HERO_GARY = 12, /* TYLER multiverse_heroes.md #35, "Gary, Bifrost Security (Off-Duty)" (S170-91) */
+    ARENA_HERO_FLUTE_DEBT = 13, /* TYLER multiverse_heroes.md #42, "Han Xiangzi's Flute-Debt" (S170-91) */
 } ArenaHeroID;
-#define ARENA_HERO_COUNT 12
+#define ARENA_HERO_COUNT 14
 
 /* The Unicorn — first real hero kit wired in (S170-18). */
 #define ARENA_UNICORN_ARMOR         4    /* passive: Chassis Claim, flat dmg reduction */
@@ -372,6 +374,42 @@ typedef enum {
 #define ARENA_LOKI_W_ARMOR_BONUS    5 /* free toggle, no cooldown -- same convention as Unicorn's W */
 #define ARENA_LOKI_R_FLOOR_MS       3500
 #define ARENA_LOKI_R_COOLDOWN_MS    24000
+
+/* Gary, Bifrost Security (Off-Duty) (S170-91, TYLER multiverse_heroes.md #35) -- pure
+ * marksman, no magic, "extraordinary eyesight, extraordinary aim." Q is a stationary
+ * long-range precision shot (no dash, no movement -- Gary doesn't chase, he watches).
+ * W is a free toggle that extends Q's own range rather than granting a stat like every
+ * other toggle so far ("watching the bridge" further out, a genuinely different toggle
+ * shape). R is a fixed-duration root on the nearest enemy -- "slow down, this isn't a
+ * track meet," simplified to a full stop the same way Tree's R/Flamel's R already
+ * simplify a slow down to a root rather than adding a real speed-multiplier system. */
+#define ARENA_GARY_Q_RANGE          6.0f
+#define ARENA_GARY_Q_RANGE_WATCHING 9.0f /* Q's range while W is toggled on */
+#define ARENA_GARY_Q_DAMAGE         11
+#define ARENA_GARY_Q_COOLDOWN_MS    3500
+#define ARENA_GARY_R_RANGE          6.0f
+#define ARENA_GARY_R_ROOT_MS        2000
+#define ARENA_GARY_R_COOLDOWN_MS    16000
+
+/* Han Xiangzi's Flute-Debt (S170-91, TYLER multiverse_heroes.md #42) -- "owes something to
+ * every wrong note ever played near him, and eventually collects." Q applies a real debt:
+ * modest damage plus the shared burning_ms/burn_dps DoT fields (S170-46), standing in for
+ * the wrong note accruing. W is a free toggle self-heal-over-time ("recouping interest"
+ * passively, even outside a fight -- reuses the same toggle-regen shape as Unicorn's W,
+ * distinct role). R is the actual payoff, "eventually collects": bonus damage against a
+ * target that still has the Q debt active when R lands, base damage otherwise -- always
+ * commits and consumes the cooldown either way (same "always lands" convention as Doc
+ * Wheel's/Flamel's R), the debt just decides how much it collects. */
+#define ARENA_FLUTE_DEBT_Q_DAMAGE      6
+#define ARENA_FLUTE_DEBT_Q_HIT_RADIUS  1.8f
+#define ARENA_FLUTE_DEBT_Q_BURN_DPS    4
+#define ARENA_FLUTE_DEBT_Q_BURN_MS     4000
+#define ARENA_FLUTE_DEBT_Q_COOLDOWN_MS 3800
+#define ARENA_FLUTE_DEBT_W_REGEN_PER_SEC 3
+#define ARENA_FLUTE_DEBT_R_RANGE        5.5f
+#define ARENA_FLUTE_DEBT_R_DAMAGE_BASE  8
+#define ARENA_FLUTE_DEBT_R_DAMAGE_DEBT  22 /* dealt instead of BASE if the target's debt (burning_ms) is still active */
+#define ARENA_FLUTE_DEBT_R_COOLDOWN_MS  18000
 
 typedef struct {
     float x, z;

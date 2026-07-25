@@ -390,7 +390,7 @@ static void net_poll_snapshots(void) {
                        founder confirmed auto-draft is fine for now -- same roster-spread
                        rule apps/arena_bot already uses, so the human doesn't get stuck
                        in ARENA_PHASE_DRAFT forever waiting on input that never comes. */
-                    int hero_id = my_owner % 12; /* ARENA_HERO_UNICORN..LOKI (S170-79) */
+                    int hero_id = my_owner % 14; /* ARENA_HERO_UNICORN..FLUTE_DEBT (S170-79, S170-91) */
                     net_send_pick(hero_id);
                     net_picked = 1;
                     printf("[arena client] auto-drafted hero_id=%d for slot %d\n", hero_id, my_owner);

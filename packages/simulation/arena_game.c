@@ -957,6 +957,56 @@ static void loki_cast_r(ArenaHero *loki) {
     loki->survive_floor_ms = ARENA_LOKI_R_FLOOR_MS;
 }
 
+/* gary_cast_q: The Property -- a stationary long-range precision shot at the nearest enemy.
+ * No dash, no movement at all (unlike every other Q in this file) -- Gary doesn't chase, he
+ * watches from where he's standing. Range is longer while W (Watching the Bridge) is toggled
+ * on. Returns 1 if a living enemy was in range, 0 on a whiff (range gates this one, not a
+ * hit-radius after a dash, since there's no dash to begin with). */
+static int gary_cast_q(ArenaHero *gary, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return 0;
+    float range = gary->w_active ? ARENA_GARY_Q_RANGE_WATCHING : ARENA_GARY_Q_RANGE;
+    float dx = foe->x - gary->x, dz = foe->z - gary->z;
+    if (sqrtf(dx * dx + dz * dz) > range) return 0;
+    apply_damage(foe, apply_armor(ARENA_GARY_Q_DAMAGE, arena_hero_armor(foe)));
+    return 1;
+}
+
+/* gary_cast_r: "Slow Down, This Isn't a Track Meet" -- a fixed-duration root on the nearest
+ * enemy, the same "slow simplified to a full stop" convention Tree's R/Flamel's R already use
+ * rather than adding a real speed-multiplier system. Returns 1 if it landed. */
+static int gary_cast_r(ArenaHero *gary, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return 0;
+    float dx = foe->x - gary->x, dz = foe->z - gary->z;
+    if (sqrtf(dx * dx + dz * dz) > ARENA_GARY_R_RANGE) return 0;
+    foe->rooted_ms = ARENA_GARY_R_ROOT_MS;
+    return 1;
+}
+
+/* flute_debt_cast_q: The Wrong Note -- modest immediate damage plus the shared burning_ms/
+ * burn_dps DoT fields (S170-46, already generically ticked by tick_hero_kit for any hero),
+ * standing in for the debt accruing. Returns 1 if it landed. */
+static int flute_debt_cast_q(ArenaHero *fd, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return 0;
+    float dx = foe->x - fd->x, dz = foe->z - fd->z;
+    if (sqrtf(dx * dx + dz * dz) > ARENA_FLUTE_DEBT_Q_HIT_RADIUS) return 0;
+    apply_damage(foe, apply_armor(ARENA_FLUTE_DEBT_Q_DAMAGE, arena_hero_armor(foe)));
+    foe->burning_ms = ARENA_FLUTE_DEBT_Q_BURN_MS;
+    foe->burn_dps = ARENA_FLUTE_DEBT_Q_BURN_DPS;
+    return 1;
+}
+
+/* flute_debt_cast_r: Eventually Collects -- always lands and consumes the cooldown (same
+ * "always commits" convention as Doc Wheel's/Flamel's R), but deals real bonus damage if the
+ * target still has the Q's debt (burning_ms > 0) active, base damage otherwise. The actual
+ * payoff of the kit's whole theme: the debt has to still be open for it to collect big. */
+static void flute_debt_cast_r(ArenaHero *fd, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return;
+    float dx = foe->x - fd->x, dz = foe->z - fd->z;
+    if (sqrtf(dx * dx + dz * dz) > ARENA_FLUTE_DEBT_R_RANGE) return;
+    int amount = (foe->burning_ms > 0) ? ARENA_FLUTE_DEBT_R_DAMAGE_DEBT : ARENA_FLUTE_DEBT_R_DAMAGE_BASE;
+    apply_damage(foe, apply_armor(amount, arena_hero_armor(foe)));
+}
+
 void arena_cast_q(int owner) {
     if (owner < 0 || owner >= ARENA_MAX_HEROES) return;
     ArenaHero *h = &arena_state.heroes[owner];
@@ -1026,6 +1076,16 @@ void arena_cast_q(int owner) {
     case ARENA_HERO_LOKI:
         if (loki_cast_q(h, foe)) {
             h->q_cooldown_ms = cast_cooldown(h, ARENA_LOKI_Q_COOLDOWN_MS);
+        }
+        break;
+    case ARENA_HERO_GARY:
+        if (gary_cast_q(h, foe)) {
+            h->q_cooldown_ms = cast_cooldown(h, ARENA_GARY_Q_COOLDOWN_MS);
+        }
+        break;
+    case ARENA_HERO_FLUTE_DEBT:
+        if (flute_debt_cast_q(h, foe)) {
+            h->q_cooldown_ms = cast_cooldown(h, ARENA_FLUTE_DEBT_Q_COOLDOWN_MS);
         }
         break;
     }
@@ -1111,6 +1171,16 @@ void arena_toggle_w(int owner) {
         /* Bound Where the Myth Says: free toggle, no cooldown, same
            convention as Unicorn's W -- arena_hero_armor() reads w_active
            directly for the actual bonus. */
+        h->w_active = !h->w_active;
+        break;
+    case ARENA_HERO_GARY:
+        /* Watching the Bridge: free toggle, no cooldown -- gary_cast_q()
+           reads w_active directly for Q's extended range, not a stat bonus. */
+        h->w_active = !h->w_active;
+        break;
+    case ARENA_HERO_FLUTE_DEBT:
+        /* Recouping Interest: free toggle self-heal-over-time, same shape
+           as Unicorn's W -- see tick_hero_kit for the actual regen tick. */
         h->w_active = !h->w_active;
         break;
     default:
@@ -1249,6 +1319,15 @@ void arena_cast_r(int owner) {
     case ARENA_HERO_LOKI:
         loki_cast_r(h);
         h->r_cooldown_ms = cast_cooldown(h, ARENA_LOKI_R_COOLDOWN_MS);
+        break;
+    case ARENA_HERO_GARY:
+        if (gary_cast_r(h, foe)) {
+            h->r_cooldown_ms = cast_cooldown(h, ARENA_GARY_R_COOLDOWN_MS);
+        }
+        break;
+    case ARENA_HERO_FLUTE_DEBT:
+        flute_debt_cast_r(h, foe);
+        h->r_cooldown_ms = cast_cooldown(h, ARENA_FLUTE_DEBT_R_COOLDOWN_MS);
         break;
     }
 }
@@ -1437,6 +1516,14 @@ static void tick_hero_kit(ArenaHero *h, ArenaHero *foe, ArenaHero *ally, unsigne
             if (h->hp > h->max_hp) h->hp = h->max_hp;
         }
         break;
+    case ARENA_HERO_FLUTE_DEBT:
+        /* Recouping Interest: same toggle-regen shape as Unicorn's W. */
+        if (h->w_active && h->alive) {
+            float regen = ARENA_FLUTE_DEBT_W_REGEN_PER_SEC * ((float)dt_ms / 1000.0f);
+            h->hp += (int)regen;
+            if (h->hp > h->max_hp) h->hp = h->max_hp;
+        }
+        break;
     default:
         break;
     }
@@ -1547,6 +1634,32 @@ static void bot_cast_kit_if_ready(ArenaHero *bot, ArenaHero *foe) {
             arena_cast_q(bot->owner);
         } else if (!bot->w_active && bot->hp < bot->max_hp / 2) {
             arena_toggle_w(bot->owner);
+        }
+        break;
+    case ARENA_HERO_GARY:
+        /* Stationary marksman -- toggle W on early for the extended range,
+           then just poke with Q whenever in range and off cooldown. R when
+           the foe is close enough to actually want rooted. */
+        if (!bot->w_active) {
+            arena_toggle_w(bot->owner);
+        } else if (bot->q_cooldown_ms <= 0 && dist <= ARENA_GARY_Q_RANGE_WATCHING) {
+            arena_cast_q(bot->owner);
+        } else if (bot->r_cooldown_ms <= 0 && dist <= ARENA_GARY_R_RANGE) {
+            arena_cast_r(bot->owner);
+        }
+        break;
+    case ARENA_HERO_FLUTE_DEBT:
+        /* Apply the debt with Q, then collect with R once it's landed --
+           R deliberately checked first isn't right (R needs foe->burning_ms
+           set by a prior Q), so Q leads and R follows once off cooldown. W
+           is passive sustain, toggle on early like Loki's early instinct
+           but without the pressure gate since it's just regen, not armor. */
+        if (!bot->w_active) {
+            arena_toggle_w(bot->owner);
+        } else if (bot->q_cooldown_ms <= 0 && dist <= ARENA_FLUTE_DEBT_Q_HIT_RADIUS) {
+            arena_cast_q(bot->owner);
+        } else if (bot->r_cooldown_ms <= 0 && dist <= ARENA_FLUTE_DEBT_R_RANGE) {
+            arena_cast_r(bot->owner);
         }
         break;
     }
