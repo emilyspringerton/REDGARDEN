@@ -1007,6 +1007,27 @@ static void flute_debt_cast_r(ArenaHero *fd, ArenaHero *foe) {
     apply_damage(foe, apply_armor(amount, arena_hero_armor(foe)));
 }
 
+/* bacon_puck_cast_q: Ask Again Later -- self intangible_ms, the shared can't-be-hit status
+ * (S170-32), for longer while W is toggled on. Always "lands" (there's no foe/range check --
+ * it's purely self-targeted), same as Ghost's W/Frog's R. */
+static void bacon_puck_cast_q(ArenaHero *bp) {
+    bp->intangible_ms = bp->w_active ? ARENA_BACON_PUCK_Q_INTANGIBLE_MS_WATCHING
+                                      : ARENA_BACON_PUCK_Q_INTANGIBLE_MS;
+}
+
+/* bacon_puck_cast_r: The Trick Was Always the Same -- real damage plus a self-heal off a
+ * fraction of it. Returns 1 if it landed. */
+static int bacon_puck_cast_r(ArenaHero *bp, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return 0;
+    float dx = foe->x - bp->x, dz = foe->z - bp->z;
+    if (sqrtf(dx * dx + dz * dz) > ARENA_BACON_PUCK_R_RANGE) return 0;
+    int dmg = apply_armor(ARENA_BACON_PUCK_R_DAMAGE, arena_hero_armor(foe));
+    apply_damage(foe, dmg);
+    bp->hp += (int)(dmg * ARENA_BACON_PUCK_R_HEAL_PCT);
+    if (bp->hp > bp->max_hp) bp->hp = bp->max_hp;
+    return 1;
+}
+
 void arena_cast_q(int owner) {
     if (owner < 0 || owner >= ARENA_MAX_HEROES) return;
     ArenaHero *h = &arena_state.heroes[owner];
@@ -1087,6 +1108,10 @@ void arena_cast_q(int owner) {
         if (flute_debt_cast_q(h, foe)) {
             h->q_cooldown_ms = cast_cooldown(h, ARENA_FLUTE_DEBT_Q_COOLDOWN_MS);
         }
+        break;
+    case ARENA_HERO_BACON_PUCK:
+        bacon_puck_cast_q(h);
+        h->q_cooldown_ms = cast_cooldown(h, ARENA_BACON_PUCK_Q_COOLDOWN_MS);
         break;
     }
 }
@@ -1181,6 +1206,12 @@ void arena_toggle_w(int owner) {
     case ARENA_HERO_FLUTE_DEBT:
         /* Recouping Interest: free toggle self-heal-over-time, same shape
            as Unicorn's W -- see tick_hero_kit for the actual regen tick. */
+        h->w_active = !h->w_active;
+        break;
+    case ARENA_HERO_BACON_PUCK:
+        /* Which One Is The Real One: free toggle, no cooldown --
+           bacon_puck_cast_q() reads w_active directly for Q's extended
+           intangibility duration, not a stat bonus. */
         h->w_active = !h->w_active;
         break;
     default:
@@ -1328,6 +1359,11 @@ void arena_cast_r(int owner) {
     case ARENA_HERO_FLUTE_DEBT:
         flute_debt_cast_r(h, foe);
         h->r_cooldown_ms = cast_cooldown(h, ARENA_FLUTE_DEBT_R_COOLDOWN_MS);
+        break;
+    case ARENA_HERO_BACON_PUCK:
+        if (bacon_puck_cast_r(h, foe)) {
+            h->r_cooldown_ms = cast_cooldown(h, ARENA_BACON_PUCK_R_COOLDOWN_MS);
+        }
         break;
     }
 }
@@ -1659,6 +1695,16 @@ static void bot_cast_kit_if_ready(ArenaHero *bot, ArenaHero *foe) {
         } else if (bot->q_cooldown_ms <= 0 && dist <= ARENA_FLUTE_DEBT_Q_HIT_RADIUS) {
             arena_cast_q(bot->owner);
         } else if (bot->r_cooldown_ms <= 0 && dist <= ARENA_FLUTE_DEBT_R_RANGE) {
+            arena_cast_r(bot->owner);
+        }
+        break;
+    case ARENA_HERO_BACON_PUCK:
+        /* Q is defensive (self intangible, Frog's escape shape) -- use it
+           when hurt, not on cooldown for its own sake. R is the primary
+           damage/heal source whenever in range and off cooldown. */
+        if (bot->hp < bot->max_hp / 3 && bot->q_cooldown_ms <= 0) {
+            arena_cast_q(bot->owner);
+        } else if (bot->r_cooldown_ms <= 0 && dist <= ARENA_BACON_PUCK_R_RANGE) {
             arena_cast_r(bot->owner);
         }
         break;

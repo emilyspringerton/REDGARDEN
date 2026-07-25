@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-07-25 (2)
+
+- feat(arena): 15th hero, Bacon+Puck merged (S170-94). Founder: "add bacon and puck as the same
+  hero." Same merge pattern as Flamel/Druid earlier in the roster -- Bacon (`multiverse_heroes.md`
+  #5, "custodian of the one location nobody's allowed to know yet," seed phrase "ask again later")
+  and Puck (#67, an unresolved duality between two versions of himself nobody can confirm is real).
+  `ARENA_HERO_COUNT` 14→15. Q "Ask Again Later" (self `intangible_ms`, the shared can't-be-hit
+  status, S170-32), W a free toggle that extends Q's own intangibility duration rather than
+  granting a stat, R "The Trick Was Always the Same" (real damage + a self-heal off a fraction of
+  it, always commits). Wired into every real call site. Verified: `build.sh`, `build_arena.sh`,
+  `test_arena.sh`, `test_10_bots.sh`, and a local mingw cross-compile, all clean.
+
 ## 2026-07-25 (1)
 
 - feat(arena): 13th/14th heroes, Gary and Flute Debt (S170-91). Founder: "add GARY to redgarden"

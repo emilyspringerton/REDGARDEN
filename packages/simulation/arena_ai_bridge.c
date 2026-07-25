@@ -20,6 +20,7 @@ const char *arena_hero_name(ArenaHeroID hero_id) {
     case ARENA_HERO_LOKI:    return "loki";
     case ARENA_HERO_GARY:    return "gary";
     case ARENA_HERO_FLUTE_DEBT: return "flute_debt";
+    case ARENA_HERO_BACON_PUCK: return "bacon_puck";
     default:                 return "unknown";
     }
 }

@@ -81,8 +81,9 @@ typedef enum {
     ARENA_HERO_LOKI = 11, /* TYLER multiverse_heroes.md #37, "Loki, Who Isn't Here" (S170-79) */
     ARENA_HERO_GARY = 12, /* TYLER multiverse_heroes.md #35, "Gary, Bifrost Security (Off-Duty)" (S170-91) */
     ARENA_HERO_FLUTE_DEBT = 13, /* TYLER multiverse_heroes.md #42, "Han Xiangzi's Flute-Debt" (S170-91) */
+    ARENA_HERO_BACON_PUCK = 14, /* TYLER multiverse_heroes.md #5 + #67, merged (S170-94) */
 } ArenaHeroID;
-#define ARENA_HERO_COUNT 14
+#define ARENA_HERO_COUNT 15
 
 /* The Unicorn — first real hero kit wired in (S170-18). */
 #define ARENA_UNICORN_ARMOR         4    /* passive: Chassis Claim, flat dmg reduction */
@@ -410,6 +411,22 @@ typedef enum {
 #define ARENA_FLUTE_DEBT_R_DAMAGE_BASE  8
 #define ARENA_FLUTE_DEBT_R_DAMAGE_DEBT  22 /* dealt instead of BASE if the target's debt (burning_ms) is still active */
 #define ARENA_FLUTE_DEBT_R_COOLDOWN_MS  18000
+
+/* Bacon+Puck, merged (S170-94, TYLER multiverse_heroes.md #5 + #67) -- Bacon's whole
+ * character is withholding ("custodian of the one location nobody's allowed to know yet,"
+ * seed phrase "ask again later"); Puck's is an unresolved duality between two versions of
+ * himself nobody can confirm is the real one. Combined kit: Q is a real "ask again later" --
+ * self intangible_ms, the shared can't-be-hit status effect (S170-32) -- and W (Puck's
+ * duality) is a free toggle that extends how long the secret stays withheld, i.e. Q's own
+ * intangibility duration, rather than granting a stat like most toggles. R pays off the
+ * mischief: real damage plus a self-heal off it, "the trick was always the same" either way. */
+#define ARENA_BACON_PUCK_Q_INTANGIBLE_MS          1500
+#define ARENA_BACON_PUCK_Q_INTANGIBLE_MS_WATCHING 3000 /* Q's intangible duration while W is toggled on */
+#define ARENA_BACON_PUCK_Q_COOLDOWN_MS             6000
+#define ARENA_BACON_PUCK_R_RANGE                   2.2f
+#define ARENA_BACON_PUCK_R_DAMAGE                  16
+#define ARENA_BACON_PUCK_R_HEAL_PCT                0.5f /* fraction of R's damage returned as self-heal */
+#define ARENA_BACON_PUCK_R_COOLDOWN_MS              15000
 
 typedef struct {
     float x, z;

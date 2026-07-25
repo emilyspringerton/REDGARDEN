@@ -390,7 +390,7 @@ static void play_one_match(void) {
                 /* Simple roster spread: pick based on owner slot so a full
                    lobby doesn't converge on one hero -- real draft strategy
                    is a later, separate concern. */
-                int hero_id = my_owner % 14; /* ARENA_HERO_UNICORN..FLUTE_DEBT (S170-48, S170-79, S170-91) */
+                int hero_id = my_owner % 15; /* ARENA_HERO_UNICORN..BACON_PUCK (S170-48, S170-79, S170-91, S170-94) */
                 send_pick(hero_id);
                 picked = 1;
                 printf("[arena_bot %d] drafted hero_id=%d\n", (int)getpid(), hero_id);

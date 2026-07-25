@@ -340,6 +340,22 @@ Q, cash it in with R.
 
 ---
 
+### Bacon+Puck (TYLER `multiverse_heroes.md` #5 + #67, merged) — **Trickster/Skirmisher** (S170-94)
+
+Two entries merged into one hero, same pattern as Flamel/Druid. Bacon's whole character is
+withholding — "custodian of the one location nobody's allowed to know yet," seed phrase "ask
+again later." Puck's is an unresolved duality nobody can confirm the real version of. Combined:
+a kit built around not being pinned down.
+
+- **Q — Ask Again Later**: self `intangible_ms` (the shared can't-be-hit status, S170-32) — for
+  longer while W is toggled on.
+- **W — Which One Is The Real One**: a free toggle (no cooldown) that extends Q's own
+  intangibility duration, rather than granting a stat like most toggles in this roster.
+- **R — The Trick Was Always the Same**: real damage plus a self-heal off a fraction of it —
+  the mischief pays for itself either way.
+
+---
+
 ## Starting Item Roster (VS0)
 
 LoL Season 3 is the explicit stylistic northstar here — not its item *names*, its item *stat-line
