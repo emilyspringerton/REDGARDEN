@@ -40,6 +40,7 @@ gcc -std=c99 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -fPIC -shared \
   -include "${ROOT_DIR}/packages/simulation/item_curriculum_mod_host.h" \
   -include "${ROOT_DIR}/packages/simulation/duck_smoke_bomb_mod_host.h" \
   -include "${ROOT_DIR}/packages/simulation/abraham_fireball_mod_host.h" \
+  -include "${ROOT_DIR}/packages/simulation/bacon_puck_intangible_speed_mod_host.h" \
   "${ROOT_DIR}/apps/arena_training/src/headless.c" \
   "${ROOT_DIR}/packages/simulation/arena_game.c" \
   "${ROOT_DIR}/packages/simulation/bloodflower_mod.c" \
@@ -48,6 +49,7 @@ gcc -std=c99 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -fPIC -shared \
   "${ROOT_DIR}/packages/simulation/item_curriculum_mod.c" \
   "${ROOT_DIR}/packages/simulation/duck_smoke_bomb_mod.c" \
   "${ROOT_DIR}/packages/simulation/abraham_fireball_mod.c" \
+  "${ROOT_DIR}/packages/simulation/bacon_puck_intangible_speed_mod.c" \
   "${ROOT_DIR}/packages/common/mlp_infer.c" \
   -lm
 

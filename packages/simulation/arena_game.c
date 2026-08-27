@@ -10,6 +10,7 @@
 #include "item_curriculum_mod_host.h"
 #include "duck_smoke_bomb_mod_host.h"
 #include "abraham_fireball_mod_host.h"
+#include "bacon_puck_intangible_speed_mod_host.h"
 
 ArenaState arena_state;
 int arena_bot_enabled = 1;
@@ -1299,6 +1300,17 @@ static void update_hero_motion(ArenaHero *h, int self_index, float dt_sec) {
     /* East/Music's Catchy Song (Jungle Camps Milestone 2): move-speed half of the buff,
        multiplicative same as the slow above so it scales correctly against item speed too. */
     if (h->king_music_carrier) speed_mult *= (1.0f + ARENA_KING_MUSIC_MOVE_SPEED_PCT / 100.0f);
+    /* Bacon+Puck's Shadow Step (Q) intangibility (2026-08-27, founder real-time: "when baconpuck
+       goes intangible can we get a movement speed increase?" -> "parena mod powered
+       development"). Real PARENA mod call (on_bacon_puck_intangible_speed_pct, stdlib/redgarden/
+       bacon_puck_intangible_speed_mod.prn), same multiplicative shape Music's own buff just above
+       already uses -- composes correctly with slows/item speed/other buffs rather than fighting
+       them. h->intangible_ms is the same real countdown bacon_puck_cast_q already sets (no new
+       state added) -- the boost is active for exactly as long as the hero actually is
+       intangible, never desyncs from it. */
+    if (h->hero_id == ARENA_HERO_BACON_PUCK && h->intangible_ms > 0) {
+        speed_mult *= (1.0f + on_bacon_puck_intangible_speed_pct() / 100.0f);
+    }
     /* §25.3 synergy decay: ambient team-cohesion move-speed bonus, same multiplicative shape as
        Music's own buff -- decays toward 0 as this hero's team's synergy_tier rises. */
     speed_mult *= (1.0f + arena_synergy_move_speed_pct(h) / 100.0f);
