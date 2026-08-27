@@ -7,6 +7,7 @@
   wire-event shape, rollout, acceptance criteria, and open decisions. (sess-20260825-1938-f6bd411e)
 
 ## 2026-08-27
+- Bacon+Puck: real movement speed increase (30%, PARENA-mod-powered) while Shadow Step's Q intangibility is active. commits 37a5396/9755bf9. (sess-20260825-1938-f6bd411e)
 
 - Cart hero: AOE zone indicators (real gap fixed, zone_radius_x10 wire field), marble-bag+Fibonacci pity RNG (first real implementation of NORTHSTAR's own pull algorithm), R finally better-weighted than W, King's Growth buff outcome added. 21 new tests. Apple #16395, commit 1515caf (sess-20260825-1938-f6bd411e)
 
