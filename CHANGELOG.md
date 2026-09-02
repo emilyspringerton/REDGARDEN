@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-02
+
+- Added the Ping System Northstar: a League-style, server-authoritative team ping design for human
+  and bot squad coordination, including tactical vocabulary, visibility integrity, bot contract,
+  wire-event shape, rollout, acceptance criteria, and open decisions. (sess-20260825-1938-f6bd411e)
+
 ## 2026-08-27
 
 - Cart hero: AOE zone indicators (real gap fixed, zone_radius_x10 wire field), marble-bag+Fibonacci pity RNG (first real implementation of NORTHSTAR's own pull algorithm), R finally better-weighted than W, King's Growth buff outcome added. 21 new tests. Apple #16395, commit 1515caf (sess-20260825-1938-f6bd411e)
