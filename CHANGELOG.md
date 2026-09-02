@@ -6,6 +6,17 @@
   and bot squad coordination, including tactical vocabulary, visibility integrity, bot contract,
   wire-event shape, rollout, acceptance criteria, and open decisions. (sess-20260825-1938-f6bd411e)
 
+- Reviewed the (upstream, Codex-authored, no-repo-context) Ping System Northstar and extended §7's
+  bot contract to ground it in the real `apps/arena_bot` squad code (`my_owner % squad_count`,
+  `hero_squad_target_node`) and require deterministic (hash, not `rand()`) timing for any bot-side
+  variance. Split the deeper "how should bots respond to pings in a human-feeling way" question
+  into a new doc, `docs/BOT_HUMANNESS_NORTHSTAR.md`: ports MISHRI's real, shipped humanness-layer
+  concepts (mood, reaction/chat-delay split, APM throttle, imperfect compliance, temperament) as
+  shapes only — every roll is a deterministic hash of `(server_tick, owner_slot, purpose_tag)`,
+  matching `arena_game.c`'s own item-curriculum-blend convention, to keep replay determinism
+  (flags, doesn't fix, the pre-existing `synergy_roll_tier` `rand()` counterexample). Both docs
+  registered in EMILY's golden-docs-index. (sess-20260902-2008-ed50169e)
+
 ## 2026-08-27
 - Bacon+Puck: real movement speed increase (30%, PARENA-mod-powered) while Shadow Step's Q intangibility is active. commits 37a5396/9755bf9. (sess-20260825-1938-f6bd411e)
 

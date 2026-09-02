@@ -2,6 +2,16 @@
 
 `status: product and protocol northstar; not implemented`
 
+*Authored upstream via a Codex PR (`garyredg/codex/write-northstar-document-for-ping-system`,
+merged 2026-09-02) without this monorepo's own session context. Reviewed the same day: the
+protocol/product design below holds up and is largely unchanged. §7 has been extended to ground
+the bot contract in REDGARDEN's actual existing bot code (not just the abstraction it already
+correctly described) and to split out the deeper "how should a bot's ping behavior actually
+**feel**" question into its own document — see
+[`BOT_HUMANNESS_NORTHSTAR.md`](BOT_HUMANNESS_NORTHSTAR.md), which also carries a real replay-
+determinism constraint this document's own §9.4 already implicitly requires but didn't spell out
+for bot-side timing.*
+
 ## 1. The job
 
 RED GARDEN needs a **fast, spatial, team-only communication system** for the arena. It must let
@@ -138,6 +148,29 @@ enemy state beyond the explicitly shared last-seen assertion and its age.
 Existing arena bots already form deterministic squads and select separate node objectives. Pings
 add an explicit, shared coordination channel above that behavior—not a replacement for it.
 
+**Grounded against the real code, not just the abstraction** (`apps/arena_bot/src/main.c`): every
+bot independently computes the same squad partition via `my_owner % squad_count`
+(`hero_squad_count`), and `hero_squad_target_node` deterministically assigns each squad the
+nearest still-unclaimed node in ascending squad-id order — this is exactly the mechanism a "one
+speaker per squad" ping-emission rule should key off (e.g. the lowest owner-slot member of a
+squad, by this same `my_owner % squad_count` partition, is the natural default nominee), and it's
+also exactly why speaker election needs the jitter `BOT_HUMANNESS_NORTHSTAR.md` §7 adds — computed
+with zero variance, every bot resolves the identical nominee on the identical tick, which is
+correct for legality/dedup but reads as mechanical the moment a human is watching. The RL-trained
+policy (`rl_policy_forward`/`team_rl_policy_forward`, NORTHSTAR §25.1) is an additive movement
+nudge layered on top of this same deterministic heuristic bot, not a separate decision-maker — v0
+ping emission/consumption belongs entirely to the heuristic layer; the RL policy does not need to
+know pings exist yet.
+
+**Determinism constraint, stated explicitly here because §9.4 depends on it**: any timing,
+eagerness, or compliance variance layered onto bot ping behavior (nominate-speaker jitter,
+reaction latency, imperfect compliance — see `BOT_HUMANNESS_NORTHSTAR.md`) must be derived from a
+deterministic hash of match state (`server_tick`, `owner_slot`, a purpose tag), never from
+`rand()`/wall-clock timing — the same convention `arena_game.c`'s item-curriculum stat blending
+already established for reproducible-across-restarts jitter. A bot's ping timing is presentation,
+not simulation state, but it still has to replay identically or the "replay determinism test" this
+document's own §9.4 calls for doesn't hold once bots start pinging.
+
 ### Emission
 
 A bot may emit a ping only when its own legal observation crosses a clear threshold, such as:
@@ -167,6 +200,10 @@ or choose a corroborating action only when:
 For v0, bots should **not** treat a human ping as an order with guaranteed compliance. That prevents
 one mistaken click from collapsing stable squad assignments and gives the eventual learned policy a
 clear problem: estimate when a teammate's tactical assertion is worth following.
+`BOT_HUMANNESS_NORTHSTAR.md` §6 gives this a concrete mechanism (a per-bot, deterministic
+compliance-noise coefficient on the utility adjustment below) rather than leaving it purely
+qualitative — worth building once Bot v0 (mechanical, unconditional-per-rule compliance) is
+proven, not before.
 
 ## 8. Network and simulation shape
 
@@ -214,7 +251,11 @@ give bots a sanitized accepted-event view, rather than letting renderer input mu
 2. **Human v0:** radial wheel, four fast keys, world marker, minimap marker, sound, accessibility
    labels, mute, and crowded-screen clustering. Exercise in both 3v3 and 10v10.
 3. **Bot v0:** legal-observation emission rules, squad speaker election, accepted-event feature
-   adapter, and conservative utility adjustments. Log decisions for inspection.
+   adapter, and conservative utility adjustments. Log decisions for inspection. Purely mechanical —
+   fixed thresholds, zero timing variance, unconditional-per-rule compliance. **Bot v1** (see
+   `BOT_HUMANNESS_NORTHSTAR.md`, sequenced after this step is proven) wraps it with deterministic
+   reaction/emission latency, per-bot temperament, and imperfect compliance, flag-gated so Bot v0's
+   exact mechanical behavior stays reproducible for training/evaluation.
 4. **Evaluation:** scripted multi-client test, replay determinism test, packet-loss/reordering test,
    and a human playtest focused on time-to-comprehension and noise.
 5. **Learned coordination:** only after the baseline is observable and stable, expose sanitized ping
