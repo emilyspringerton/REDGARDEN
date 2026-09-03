@@ -252,6 +252,16 @@ const ArenaItemDef ARENA_ITEMS[ARENA_ITEM_COUNT] = {
        the Trinket slot with Haste Trinket/Empress Hairpin/Balance Ring -- a real build choice
        between them, not a strict upgrade. */
     { "Kite String",        ARENA_ITEM_SLOT_TRINKET, ARENA_ITEM_TIER_GENERIC, 3333,  0,   0,   0,  0, 0.0f, 0,  0, 0, 4 },
+    /* Luck of the Draw (S205-87, founder, cruise-queue: "we should have a weapon that is on
+       like page 5 for 2.2k flow a trinket called 'luck of the draw' that gives some mana regen
+       during combat") -- no flat stats at all, same "this IS the item, not a bonus on top of
+       one" shape Kite String's own entry just above already established. Shares the Trinket
+       slot with Haste Trinket/Empress Hairpin/Balance Ring/Kite String -- a real build choice,
+       not a strict upgrade over any of them. +1 flat mp/sec while in combat, doubling the base
+       ARENA_MP_REGEN_IN_COMBAT_PER_SEC trickle (1) to 2 while equipped -- a real, modest
+       improvement, same restraint Haste Trinket's own "make it a modest improvement" precedent
+       set, not a build-defining spike. */
+    { "Luck of the Draw",   ARENA_ITEM_SLOT_TRINKET, ARENA_ITEM_TIER_GENERIC, 2200,  0,   0,   0,  0, 0.0f, 0,  0, 0, 0, 1 },
 };
 
 /* Item curriculum: see arena_game.h's own "Item curriculum" section doc comment for the full
@@ -2154,7 +2164,7 @@ void arena_shop_position(int team, float *x, float *z) {
  * comment. */
 void arena_recompute_item_stats(ArenaHero *h) {
     int bonus_hp = 0, bonus_mp = 0, bonus_armor = 0, bonus_ad = 0, bonus_cdr = 0;
-    int bonus_true_dmg = 0, bonus_lifesteal = 0, bonus_range_pct = 0;
+    int bonus_true_dmg = 0, bonus_lifesteal = 0, bonus_range_pct = 0, bonus_mp_regen_combat = 0;
     float bonus_speed = 0.0f;
     for (int s = 0; s < ARENA_ITEM_SLOT_COUNT; s++) {
         int item_id = h->equipped_item[s];
@@ -2169,6 +2179,7 @@ void arena_recompute_item_stats(ArenaHero *h) {
         bonus_true_dmg += def->bonus_true_dmg; /* 2026-08-11 */
         bonus_lifesteal += def->bonus_lifesteal_pct; /* 2026-08-11 */
         bonus_range_pct += def->bonus_attack_range_pct; /* S202-34, Kite String */
+        bonus_mp_regen_combat += def->bonus_mp_regen_combat; /* S205-87, Luck of the Draw */
     }
 
     int old_max_hp = h->max_hp;
@@ -2190,6 +2201,7 @@ void arena_recompute_item_stats(ArenaHero *h) {
     h->item_bonus_true_dmg = bonus_true_dmg; /* 2026-08-11 */
     h->item_bonus_lifesteal_pct = bonus_lifesteal; /* 2026-08-11 */
     h->item_bonus_attack_range_pct = bonus_range_pct; /* S202-34, Kite String */
+    h->item_bonus_mp_regen_combat = bonus_mp_regen_combat; /* S205-87, Luck of the Draw */
 }
 
 /* arena_shop_buy (S170-175): see header declaration's doc comment. */
@@ -5863,7 +5875,15 @@ static void tick_hero_kit(ArenaHero *h, ArenaHero *foe, ArenaHero *ally, unsigne
        WoW-style out-of-combat regen, just no longer a dead stop at 0 while
        fighting. */
     if (h->alive && h->mp < h->max_mp) {
-        float rate = (h->combat_timer_ms > 0) ? ARENA_MP_REGEN_IN_COMBAT_PER_SEC : ARENA_MP_REGEN_PER_SEC;
+        /* S205-87, Luck of the Draw: item_bonus_mp_regen_combat only applies to the IN-COMBAT
+           rate specifically -- the founder's own ask names "mana regen during combat," not a
+           general regen buff, same narrow-scope discipline every other trinket bonus on this
+           hero already holds itself to (bonus_attack_range_pct is auto-attack range only, not
+           ability range; bonus_cdr_pct is the one deliberate exception, scoped explicitly to
+           both cooldown types by its own founder quote). */
+        float rate = (h->combat_timer_ms > 0)
+            ? ARENA_MP_REGEN_IN_COMBAT_PER_SEC + (float)h->item_bonus_mp_regen_combat
+            : ARENA_MP_REGEN_PER_SEC;
         h->mp_regen_accum += rate * ((float)dt_ms / 1000.0f);
         int whole = (int)h->mp_regen_accum;
         if (whole > 0) {

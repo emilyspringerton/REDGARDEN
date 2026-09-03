@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-03 (3)
+
+- New Trinket-slot item, "Luck of the Draw" (S242-01, cruise queue): +1 flat mp/sec regen while
+  in combat, 2200 Flow. New ArenaItemDef.bonus_mp_regen_combat field + cached ArenaHero.
+  item_bonus_mp_regen_combat, same trailing-field convention every prior trinket append (Haste
+  Trinket, Kite String) already used; the in-combat mana-regen rate now reads
+  ARENA_MP_REGEN_IN_COMBAT_PER_SEC + item_bonus_mp_regen_combat, scoped to in-combat only. New
+  test verifies both the boost and that it doesn't leak into the out-of-combat rate.
+  ARENA_ITEM_COUNT 34->35 (real, honest note: this computes to shop page 4, not the founder's own
+  literal "page 5" -- treated as descriptive, not padded with filler items to force a 5th page).
+  Reconciled a real, live data-integrity issue found along the way: the kanban card carrying this
+  ask had backlog_item_id S205-87, already a real, different, existing item -- given its own
+  correct id (S242-01) instead. scripts/test_arena.sh (1145 assertions) and test_10_bots.sh both
+  green. (sess-20260902-2008-ed50169e)
+
 ## 2026-09-03 (2)
 
 - Ping System Northstar: resolved S189-03 ("team awareness of Kings") -- the founder call the

@@ -5352,6 +5352,37 @@ static void test_item_catalog_reaches_shop_page_4(void) {
     CHECK(ARENA_ITEM_COUNT >= 34, "Kite String landed, pushing the catalog from 33 to 34+ -- apps/arena's own SHOP_PAGE_COUNT (ceil(ARENA_ITEM_COUNT/9)) derives page 4 from this alone, no separate paging code needed");
 }
 
+static void test_luck_of_the_draw_boosts_in_combat_mp_regen_only(void) {
+    /* S205-87: "Luck of the Draw" -- +1 flat mp/sec on top of ARENA_MP_REGEN_IN_COMBAT_PER_SEC,
+       in combat only. Real, deliberate contrast with test_gae_bolg/test_masamune above: this
+       verifies a NON-combat mechanic (a passive regen rate, not a damage/heal event on a landed
+       attack), so the test drives arena_update directly rather than waiting out a real attack
+       windup. */
+    arena_init();
+    ArenaHero *h = &arena_state.heroes[0];
+    int id = find_item_id_by_name("Luck of the Draw");
+    CHECK(id >= 0, "Luck of the Draw exists in the catalog");
+    h->equipped_item[ARENA_ITEM_SLOT_TRINKET] = id;
+    arena_recompute_item_stats(h);
+    CHECK(h->item_bonus_mp_regen_combat == 1, "the item's own +1 bonus is reflected in the recomputed cache");
+
+    h->mp = 0;
+    h->max_mp = 100;
+    h->combat_timer_ms = 5000; /* in combat */
+    arena_update(1000); /* exactly one real second */
+    CHECK(h->mp == ARENA_MP_REGEN_IN_COMBAT_PER_SEC + 1,
+          "in combat, equipping Luck of the Draw regens the base trickle PLUS its own +1, not just +1 alone or the base alone");
+
+    /* Real, deliberate scope check matching this item's own founder quote ("mana regen during
+       combat"): the bonus must NOT leak into the out-of-combat rate, unlike bonus_cdr_pct's own
+       deliberately wider (both cooldown types) scope. */
+    h->mp = 0;
+    h->combat_timer_ms = 0; /* out of combat */
+    arena_update(1000);
+    CHECK(h->mp == ARENA_MP_REGEN_PER_SEC,
+          "out of combat, the bonus does not apply -- only the normal out-of-combat rate, exactly matching the founder's own 'during combat' scope");
+}
+
 static void test_gae_bolg_true_damage_bypasses_armor(void) {
     arena_init_teams();
     for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
@@ -7381,6 +7412,7 @@ int main(void) {
     test_haste_trinket_reduces_auto_attack_cooldown();
     test_haste_trinket_does_not_shrink_windup();
     test_item_catalog_reaches_shop_page_4();
+    test_luck_of_the_draw_boosts_in_combat_mp_regen_only();
     test_gae_bolg_true_damage_bypasses_armor();
     test_masamune_lifesteal_heals_attacker();
     test_muramasa_extreme_glass_cannon_catalog_entry();

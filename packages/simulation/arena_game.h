@@ -1485,10 +1485,35 @@ typedef struct {
      * every existing item via the same positional-initializer convention every other trailing
      * stat on this struct already relies on. */
     int bonus_attack_range_pct;
+    /* bonus_mp_regen_combat (S205-87, "Luck of the Draw" trinket, founder, cruise-queue: "we
+     * should have a weapon that is on like page 5 for 2.2k flow a trinket called 'luck of the
+     * draw' that gives some mana regen during combat") -- a flat bonus added directly to
+     * ARENA_MP_REGEN_IN_COMBAT_PER_SEC (arena_game.c's own real mana-regen tick), not a
+     * percentage: that base in-combat rate is itself a flat int (1), so a flat bonus is the
+     * consistent unit, not the %-shape bonus_cdr_pct/bonus_attack_range_pct use for their own
+     * different base mechanics. Zero-fills for every existing item via the same trailing-field
+     * positional-initializer convention every prior append (bonus_cdr_pct, bonus_true_dmg/
+     * bonus_lifesteal_pct, bonus_attack_range_pct) already established. */
+    int bonus_mp_regen_combat;
 } ArenaItemDef;
 
 extern const ArenaItemDef ARENA_ITEMS[];
-#define ARENA_ITEM_COUNT 34 /* 2026-08-26: was 33 -- +1 for Kite String (S202-34, founder: "add an item that increases auto attack range by 4% 3333 flow 'Kite String' trinket"), appended at the end of the catalog, same "indices stay stable" convention every prior append already used. 2026-08-11: was 27 -- +6 for the "expand the play space" first pass (Gae Bolg, Masamune, Muramasa, Balance Ring, Empress Hairpin, Ninja Tekko), pushing the shop UI's own SHOP_PAGE_COUNT (apps/arena/src/main.c, ceil(ARENA_ITEM_COUNT/SHOP_ITEMS_PER_PAGE)) from 3 to a real 4th page -- founder: "add page 4 to the shop." No client-side paging code needed for this: SHOP_PAGE_COUNT is entirely derived from this one constant already. */
+#define ARENA_ITEM_COUNT 35 /* 2026-09-03: was 34 -- +1 for Luck of the Draw (S205-87, founder,
+    cruise-queue: "we should have a weapon that is on like page 5 for 2.2k flow a trinket called
+    'luck of the draw' that gives some mana regen during combat"), appended at the end of the
+    catalog, same "indices stay stable" convention every prior append already used. Real, honest
+    note: at this catalog size SHOP_PAGE_COUNT (apps/arena/src/main.c, ceil(ARENA_ITEM_COUNT/
+    SHOP_ITEMS_PER_PAGE), 9 items/page) computes to page 4, not page 5 -- the founder's own "page
+    5" was descriptive ("somewhere further down the shop"), not a literal page-count requirement
+    to hit exactly; not padded with filler items just to force a 5th page that doesn't reflect a
+    real 37th+ item existing yet. 2026-08-26: was 33 -- +1 for Kite String (S202-34, founder:
+    "add an item that increases auto attack range by 4% 3333 flow 'Kite String' trinket"),
+    appended at the end of the catalog, same "indices stay stable" convention every prior append
+    already used. 2026-08-11: was 27 -- +6 for the "expand the play space" first pass (Gae Bolg,
+    Masamune, Muramasa, Balance Ring, Empress Hairpin, Ninja Tekko), pushing the shop UI's own
+    SHOP_PAGE_COUNT from 3 to a real 4th page -- founder: "add page 4 to the shop." No
+    client-side paging code needed for this: SHOP_PAGE_COUNT is entirely derived from this one
+    constant already. */
 /* ARENA_BALANCE_RING_ITEM_ID (2026-08-11, "expand the play space" pass): a named index, same
  * reasoning ARENA_BLINK_DAGGER_ITEM_ID's own doc comment gives -- Balance Ring's comeback armor
  * bonus scales LIVE with the wearer's own missing-HP fraction (computed inside
@@ -2385,6 +2410,10 @@ typedef struct {
      * increases auto attack range by 4% 3333 flow"): same recomputed-cache shape as the fields
      * above, consumed by arena_hero_attack_range(). */
     int item_bonus_attack_range_pct;
+    /* item_bonus_mp_regen_combat (S205-87, Luck of the Draw trinket): same recomputed-cache
+     * shape as the fields above, consumed directly by the mana-regen tick's own in-combat rate
+     * (arena_game.c, "Mana regen" comment). */
+    int item_bonus_mp_regen_combat;
     /* facing_rad (S202-40, Bacon+Puck's Shadow Step, founder: "add a sense of hero direction i
      * guess so we can actually teleport behind them"): a real, server-authoritative facing
      * angle, updated in update_hero_motion from the live movement direction (atan2f(dx, dz),
