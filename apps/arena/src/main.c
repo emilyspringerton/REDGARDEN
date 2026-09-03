@@ -62,6 +62,17 @@ static int force_box_rig = 0; /* S144-07: F9 A/B-toggles Tyler's real skinned me
 static int shop_page = 0; /* S170-231, founder: "too many items per page more pages navigate pages with shift 1 2 3" -- 0-indexed, Shift+1/2/3 jump straight to page 1/2/3 */
 static int shop_was_in_range = 0; /* S170-231, founder: "pop the shop window up when you get close to the shop enough to buy" -- edge-triggered latch for the proximity auto-open/close below, so it only fires on the in-range/out-of-range transition and never fights a manual B press made while standing still */
 
+/* Settings pane (3424324/343543, kanban cruise-queue cards: "REDGARDEN settings pane" /
+ * "REDGARDEN settings volume slider"). Escape toggles it, same "works in any mode" precedent
+ * F11/H/B already established -- unlike those, Escape wasn't bound to anything yet. master_volume
+ * scales every play_tone() call (see that function's own doc comment) rather than each call site
+ * scaling itself, so this is the one real place a player-controlled volume setting needs to live.
+ * Session-only (not persisted to disk) -- this client has no existing settings-file/config
+ * mechanism to hang a save onto; a real "remember it next launch" pass is separate, later work. */
+static int show_settings_pane = 0;
+static float master_volume = 1.0f; /* 0.0 (muted) .. 1.0 (full) */
+static int settings_volume_dragging = 0; /* mouse-down-and-held on the slider track/handle */
+
 /* Shop panel layout (S170-175): shared by the click hit-test in the event
  * loop and the draw call in the render pass, so a click always lands on
  * exactly the row it visually appears over -- both sites compute these from
@@ -99,6 +110,25 @@ static void shop_panel_origin(int win_w, int win_h, float *sp_x, float *sp_y_top
     (void)win_w;
     *sp_x = 40.0f;
     *sp_y_top = (float)win_h - 70.0f;
+}
+
+/* Settings pane geometry (3424324/343543): same "click hit-test and render pass share one
+ * formula" discipline shop_panel_origin's own doc comment establishes, so a click always lands
+ * on exactly the slider it visually appears over. Centered on screen, same real reason the
+ * ability-help panel above centers on win_w -- it's a modal-feeling overlay, not anchored HUD. */
+#define SETTINGS_PANEL_W 360.0f
+#define SETTINGS_PANEL_H 150.0f
+#define SETTINGS_SLIDER_W 260.0f
+#define SETTINGS_SLIDER_H 14.0f
+static void settings_panel_origin(int win_w, int win_h, float *panel_x, float *panel_y) {
+    *panel_x = (float)win_w / 2.0f - SETTINGS_PANEL_W / 2.0f;
+    *panel_y = (float)win_h / 2.0f - SETTINGS_PANEL_H / 2.0f;
+}
+static void settings_slider_track(int win_w, int win_h, float *track_x, float *track_y) {
+    float panel_x, panel_y;
+    settings_panel_origin(win_w, win_h, &panel_x, &panel_y);
+    *track_x = panel_x + (SETTINGS_PANEL_W - SETTINGS_SLIDER_W) / 2.0f;
+    *track_y = panel_y + SETTINGS_PANEL_H / 2.0f - SETTINGS_SLIDER_H / 2.0f;
 }
 static const char *ARENA_ITEM_SLOT_NAMES[ARENA_ITEM_SLOT_COUNT] = {
     "WEAPON", "HEAD", "BODY", "HANDS", "LEGS", "FEET", "RING", "NECK", "BACK", "WAIST", "TRINKET"
@@ -2616,9 +2646,18 @@ static void audio_init(void) {
 
 /* play_tone: synthesizes duration_ms of a sine wave at freq_hz and queues it
  * for immediate playback. Linear fade-out over the last ~15ms avoids the
- * audible click a hard-cut sine wave would otherwise produce. */
+ * audible click a hard-cut sine wave would otherwise produce.
+ *
+ * `volume` is each call site's own relative mix level for that specific cue; master_volume
+ * (3424324/343543, the settings-pane volume slider) scales on top of that here, the one real
+ * place a player-controlled master level needs to apply, rather than threading it through every
+ * individual play_tone call site. master_volume == 0.0 makes every cue silent without touching
+ * audio_dev at all -- same "no crash, just no sound" degradation this function already documents
+ * for a missing audio device. */
 static void play_tone(float freq_hz, float duration_ms, float volume) {
     if (audio_dev == 0) return;
+    volume *= master_volume;
+    if (volume <= 0.0f) return;
     int sample_rate = 44100;
     int n = (int)(sample_rate * duration_ms / 1000.0f);
     if (n <= 0) return;
@@ -2920,6 +2959,10 @@ int main(int argc, char *argv[]) {
             if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_h) {
                 show_ability_help = !show_ability_help; /* same "works in any mode" precedent as F11 above */
             }
+            if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) {
+                show_settings_pane = !show_settings_pane; /* 3424324, same "works in any mode" precedent as F11/H/B above */
+                if (!show_settings_pane) settings_volume_dragging = 0; /* closing mid-drag shouldn't leave a stuck drag state for next open */
+            }
             if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_b) {
                 shop_open = !shop_open; /* S170-175, same "works in any mode" precedent as F11/H above -- arena_shop_buy/sell themselves reject a purchase made out of range, so toggling far from a shop is harmless, not broken */
             }
@@ -3032,6 +3075,52 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
+            /* Settings pane click/drag (3424324/343543): same "compute the click hit-test
+               against the exact geometry the render pass itself draws" discipline the shop
+               panel above already follows (settings_slider_track is shared with the draw call
+               below). settings_click_consumed mirrors shop_click_consumed's own doc comment --
+               a click anywhere inside the pane (not just directly on the slider) must not also
+               fall through to the movement handler. The slider itself resolves on mouse-down AND
+               continues tracking on mouse-motion while held (settings_volume_dragging), the
+               standard "grab and drag a slider handle" affordance -- unlike the shop's
+               single-click-resolves rows, a volume slider needs continuous drag feedback, not
+               just a one-shot click. */
+            int settings_click_consumed = 0;
+            if (show_settings_pane && e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+                float bx = (float)e.button.x, by = (float)(win_h - e.button.y);
+                float panel_x, panel_y;
+                settings_panel_origin(win_w, win_h, &panel_x, &panel_y);
+                if (bx >= panel_x && bx <= panel_x + SETTINGS_PANEL_W &&
+                    by >= panel_y && by <= panel_y + SETTINGS_PANEL_H) {
+                    settings_click_consumed = 1;
+                }
+                float track_x, track_y;
+                settings_slider_track(win_w, win_h, &track_x, &track_y);
+                /* Generous vertical grab margin (+-10px around the thin track) -- a slider this
+                   thin is hard to hit exactly, same "forgiving hit-test" reasoning the shop
+                   panel's own row bounding boxes already use (SHOP_ROW_H - 2.0f margin). */
+                if (bx >= track_x && bx <= track_x + SETTINGS_SLIDER_W &&
+                    by >= track_y - 10.0f && by <= track_y + SETTINGS_SLIDER_H + 10.0f) {
+                    settings_volume_dragging = 1;
+                    float frac = (bx - track_x) / SETTINGS_SLIDER_W;
+                    if (frac < 0.0f) frac = 0.0f;
+                    if (frac > 1.0f) frac = 1.0f;
+                    master_volume = frac;
+                }
+            }
+            if (e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_LEFT) {
+                settings_volume_dragging = 0;
+            }
+            if (show_settings_pane && settings_volume_dragging && e.type == SDL_MOUSEMOTION) {
+                float bx = (float)e.motion.x;
+                float track_x, track_y;
+                settings_slider_track(win_w, win_h, &track_x, &track_y);
+                (void)track_y;
+                float frac = (bx - track_x) / SETTINGS_SLIDER_W;
+                if (frac < 0.0f) frac = 0.0f;
+                if (frac > 1.0f) frac = 1.0f;
+                master_volume = frac;
+            }
             /* S202-34: right-click cancels ground-target aiming without casting -- checked
                before camera-drag engages so a cancel-click doesn't also start dragging the
                camera the same frame (harmless either way, but this reads cleaner). */
@@ -3083,6 +3172,7 @@ int main(int argc, char *argv[]) {
              * -- see that variable's own doc comment above; a click the shop
              * panel already handled (or that just landed on its own blank
              * space) must not also fall through and move the player.
+             * !settings_click_consumed (3424324/343543): same idiom, for the settings pane.
              *
              * 2026-07-30, Tyler clone-control rework: this used to act directly on
              * SDL_MOUSEBUTTONDOWN. Now it only RECORDS the down-position here -- the actual
@@ -3094,6 +3184,7 @@ int main(int argc, char *argv[]) {
              * byte-for-byte like the old mousedown-triggered code -- zero behavior change for
              * the other 27 heroes' existing muscle memory. */
             if (!observing && !shop_click_consumed && !ground_target_click_consumed &&
+                !settings_click_consumed &&
                 e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT &&
                 arena_state.winner == 0) {
                 left_drag_active = 1;
@@ -4961,6 +5052,61 @@ int main(int argc, char *argv[]) {
                     row_y -= 44.0f;
                 }
             }
+        }
+
+        /* Settings pane (3424324/343543, "REDGARDEN settings pane" / "REDGARDEN settings volume
+           slider"): Escape toggles it. Unlike the ability-help/character-stat panes above, this
+           one is drawn unconditionally (not gated on my_owner/hero_id) since it's a real client
+           preference, not match-state readout -- it makes sense to open even while observing a
+           logged match. Geometry shared with the click/drag handler above via
+           settings_panel_origin/settings_slider_track, same discipline shop_panel_origin's own
+           doc comment establishes. */
+        if (show_settings_pane) {
+            float panel_x, panel_y;
+            settings_panel_origin(win_w, win_h, &panel_x, &panel_y);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glColor4f(0.05f, 0.08f, 0.1f, 0.92f);
+            glRectf(panel_x, panel_y, panel_x + SETTINGS_PANEL_W, panel_y + SETTINGS_PANEL_H);
+            glColor4f(0.4f, 0.55f, 0.65f, 0.9f);
+            glLineWidth(2.0f);
+            glBegin(GL_LINE_LOOP);
+            glVertex2f(panel_x, panel_y); glVertex2f(panel_x + SETTINGS_PANEL_W, panel_y);
+            glVertex2f(panel_x + SETTINGS_PANEL_W, panel_y + SETTINGS_PANEL_H); glVertex2f(panel_x, panel_y + SETTINGS_PANEL_H);
+            glEnd();
+            glLineWidth(1.0f);
+            glDisable(GL_BLEND);
+
+            glColor3f(0.9f, 0.95f, 1.0f);
+            draw_string("SETTINGS", panel_x + 16.0f, panel_y + SETTINGS_PANEL_H - 26.0f, 14);
+            glColor3f(0.7f, 0.75f, 0.8f);
+            draw_string("ESC TO CLOSE", panel_x + SETTINGS_PANEL_W - 130.0f, panel_y + SETTINGS_PANEL_H - 26.0f, 8);
+
+            glColor3f(0.85f, 0.9f, 0.7f);
+            draw_string("MASTER VOLUME", panel_x + 16.0f, panel_y + SETTINGS_PANEL_H / 2.0f + 26.0f, 9);
+
+            /* Slider track + filled portion + handle -- same immediate-mode-quad idiom every
+               other bar/pie affordance in this HUD already uses (ability cooldown pies,
+               HP/MP bars above). Filled portion drawn first, then the handle on top of it. */
+            float track_x, track_y;
+            settings_slider_track(win_w, win_h, &track_x, &track_y);
+            glColor4f(0.15f, 0.18f, 0.2f, 1.0f);
+            glRectf(track_x, track_y, track_x + SETTINGS_SLIDER_W, track_y + SETTINGS_SLIDER_H);
+            glColor4f(0.4f, 0.75f, 0.95f, 1.0f);
+            glRectf(track_x, track_y, track_x + SETTINGS_SLIDER_W * master_volume, track_y + SETTINGS_SLIDER_H);
+            glColor4f(0.4f, 0.55f, 0.65f, 0.9f);
+            glBegin(GL_LINE_LOOP);
+            glVertex2f(track_x, track_y); glVertex2f(track_x + SETTINGS_SLIDER_W, track_y);
+            glVertex2f(track_x + SETTINGS_SLIDER_W, track_y + SETTINGS_SLIDER_H); glVertex2f(track_x, track_y + SETTINGS_SLIDER_H);
+            glEnd();
+            float handle_x = track_x + SETTINGS_SLIDER_W * master_volume;
+            glColor4f(0.95f, 0.98f, 1.0f, 1.0f);
+            glRectf(handle_x - 3.0f, track_y - 4.0f, handle_x + 3.0f, track_y + SETTINGS_SLIDER_H + 4.0f);
+
+            char vol_line[16];
+            snprintf(vol_line, sizeof(vol_line), "%d%%", (int)(master_volume * 100.0f + 0.5f));
+            glColor3f(0.9f, 0.95f, 1.0f);
+            draw_string(vol_line, track_x + SETTINGS_SLIDER_W + 14.0f, track_y, 9);
         }
 
         /* Character stat pane (S170-175, founder: "we need a character display pane that
