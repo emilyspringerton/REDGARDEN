@@ -368,6 +368,16 @@ typedef enum {
 #define ARENA_DUCK_W_DURATION_MS    6000  /* Smoke Bomb: how long the cloud lingers */
 #define ARENA_DUCK_W_COOLDOWN_MS    16000
 
+/* Smoke Bomb slow (S205-87, kanban priority-queue card: "duck smoke bomb should have a 50%
+ * chance to slow each enemy hit by it"). Rolled independently per enemy caught in the cast-time
+ * radius check below (redgarden_host_duck_smoke_bomb_cast) -- "each enemy hit by it" means each
+ * enemy standing inside the cloud at the moment it's thrown, the only real "hit" this ability
+ * has (it has no damage/tick component, purely vision-blocking otherwise). Duration/pct values
+ * follow the exact same real precedent ARENA_CART_DELIVERY_SLOW_MS/_PCT already established. */
+#define ARENA_DUCK_W_SLOW_CHANCE_PCT 50     /* integer 0-100: 50% independent roll per enemy hit */
+#define ARENA_DUCK_W_SLOW_MS         2000
+#define ARENA_DUCK_W_SLOW_PCT        0.30f
+
 /* The Ghost — third hero kit (S170-32). First kit needing real status-effect
  * state (silence, intangibility) rather than just cooldowns/toggles. R's
  * ally-heal side (docs/HEROES_VS0.md: "same zone, opposite effect depending

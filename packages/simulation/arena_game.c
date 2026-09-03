@@ -3496,7 +3496,14 @@ void redgarden_host_tree_passive_strike(int hero_index, int obstacle_index) {
     if (h->hp > h->max_hp) h->hp = h->max_hp;
 }
 
-/* redgarden_host_duck_smoke_bomb_cast: see header declaration's own doc comment. */
+/* redgarden_host_duck_smoke_bomb_cast: see header declaration's own doc comment.
+ *
+ * S205-87: each enemy standing inside the cloud radius at the moment it's thrown gets an
+ * independent 50% chance (ARENA_DUCK_W_SLOW_CHANCE_PCT) to be slowed (ARENA_DUCK_W_SLOW_MS/
+ * _PCT) -- "each enemy hit by it" means each enemy this cast-time radius check finds, the only
+ * real "hit" this vision-only ability has. Rolled once per enemy here at cast time, not
+ * re-rolled on every tick the cloud lingers -- matches "hit by it" (the throw), not "standing in
+ * it" (continuous), and avoids an enemy who steps out and back in re-rolling for free. */
 void redgarden_host_duck_smoke_bomb_cast(int hero_index) {
     if (hero_index < 0 || hero_index >= ARENA_HEROES_ARRAY_SIZE) return;
     ArenaHero *h = &arena_state.heroes[hero_index];
@@ -3504,6 +3511,16 @@ void redgarden_host_duck_smoke_bomb_cast(int hero_index) {
     h->duck_smoke_ms = ARENA_DUCK_W_DURATION_MS;
     h->duck_smoke_x = h->x;
     h->duck_smoke_z = h->z;
+
+    for (int i = 0; i < ARENA_MAX_HEROES; i++) {
+        ArenaHero *enemy = &arena_state.heroes[i];
+        if (!enemy->active || !enemy->alive || enemy->team == h->team) continue;
+        float dx = enemy->x - h->x, dz = enemy->z - h->z;
+        if (dx * dx + dz * dz > ARENA_DUCK_W_RADIUS * ARENA_DUCK_W_RADIUS) continue; /* not caught in the cloud */
+        if ((rand() % 100) < ARENA_DUCK_W_SLOW_CHANCE_PCT) {
+            arena_apply_slow(enemy->owner, ARENA_DUCK_W_SLOW_MS, ARENA_DUCK_W_SLOW_PCT);
+        }
+    }
 }
 
 /* redgarden_host_abraham_fireball_cast: see header declaration's own doc comment. Called from

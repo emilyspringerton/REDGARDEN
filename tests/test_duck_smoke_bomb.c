@@ -13,6 +13,7 @@
  * asserts the cast lands through the real compiled mod (on_duck_smoke_bomb_cast ->
  * redgarden_host_duck_smoke_bomb_cast), not a direct call to the host function. */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
@@ -149,6 +150,83 @@ static void test_duck_smoke_decrements_through_real_team_mode_arena_update_teams
           "arena_update_teams() (the team-mode tick) also decrements duck_smoke_ms, same as arena_update() does");
 }
 
+/* S205-87: "duck smoke bomb should have a 50% chance to slow each enemy hit by it." An enemy
+ * standing inside the cloud radius at cast time is the "hit" this vision-only ability has. */
+static void test_duck_w_can_slow_an_enemy_caught_in_the_cloud(void) {
+    arena_init_with_heroes(ARENA_HERO_DUCK, ARENA_HERO_UNICORN);
+    ArenaHero *duck = &arena_state.heroes[0];
+    ArenaHero *foe = &arena_state.heroes[1];
+    duck->x = 10.0f; duck->z = 10.0f;
+    duck->mp = 999;
+    foe->x = 10.0f; foe->z = 10.0f; /* standing right on top of Duck -- well inside ARENA_DUCK_W_RADIUS */
+
+    /* redgarden_host_duck_smoke_bomb_cast rolls rand() % 100 per enemy caught in the cloud --
+     * seed + retry a bounded number of times rather than assert a specific rand() sequence
+     * (which isn't a portable guarantee across libc implementations); real assertion is just
+     * that the slow CAN actually land through the real cast path, not a specific roll value. */
+    int landed = 0;
+    for (int seed = 0; seed < 200 && !landed; seed++) {
+        foe->slowed_ms = 0;
+        foe->slow_pct = 0.0f;
+        srand((unsigned)seed);
+        redgarden_host_duck_smoke_bomb_cast(0);
+        if (foe->slowed_ms > 0) landed = 1;
+    }
+    CHECK(landed, "an enemy caught in the cloud can be slowed by the real cast path (found within 200 seeds)");
+    CHECK(foe->slow_pct == ARENA_DUCK_W_SLOW_PCT, "the applied slow uses the real Smoke Bomb slow pct");
+    CHECK(foe->slowed_ms == ARENA_DUCK_W_SLOW_MS, "the applied slow uses the real Smoke Bomb slow duration");
+}
+
+static void test_duck_w_slow_chance_is_roughly_fifty_percent(void) {
+    const int trials = 1000;
+    int slowed_count = 0;
+    srand(42); /* fixed seed for a reproducible, non-flaky statistical check */
+    for (int i = 0; i < trials; i++) {
+        arena_init_with_heroes(ARENA_HERO_DUCK, ARENA_HERO_UNICORN);
+        ArenaHero *duck = &arena_state.heroes[0];
+        ArenaHero *foe = &arena_state.heroes[1];
+        duck->x = 0.0f; duck->z = 0.0f;
+        duck->mp = 999;
+        foe->x = 0.0f; foe->z = 0.0f;
+        redgarden_host_duck_smoke_bomb_cast(0);
+        if (foe->slowed_ms > 0) slowed_count++;
+    }
+    /* Wide band (30-70%) on purpose -- this proves the roll is genuinely ~50/50, not that it's
+     * exactly 50.0%, avoiding a flaky test over normal binomial variance at n=1000. */
+    CHECK(slowed_count > trials * 30 / 100 && slowed_count < trials * 70 / 100,
+          "the slow lands on roughly 50% of enemies hit across many casts, not ~0% or ~100%");
+}
+
+static void test_duck_w_slow_does_not_hit_an_enemy_outside_the_cloud(void) {
+    arena_init_with_heroes(ARENA_HERO_DUCK, ARENA_HERO_UNICORN);
+    ArenaHero *duck = &arena_state.heroes[0];
+    ArenaHero *foe = &arena_state.heroes[1];
+    duck->x = 0.0f; duck->z = 0.0f;
+    duck->mp = 999;
+    foe->x = 50.0f; foe->z = 50.0f; /* well outside ARENA_DUCK_W_RADIUS */
+
+    srand(1);
+    redgarden_host_duck_smoke_bomb_cast(0);
+
+    CHECK(foe->slowed_ms == 0, "an enemy standing outside the cloud radius is never slowed, regardless of the roll");
+}
+
+static void test_duck_w_slow_does_not_hit_an_ally(void) {
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    ArenaHero *duck = &arena_state.heroes[0];
+    ArenaHero *ally = &arena_state.heroes[1]; /* same team as Duck */
+    duck->hero_id = ARENA_HERO_DUCK;
+    duck->x = 0.0f; duck->z = 0.0f;
+    duck->mp = 999;
+    ally->x = 0.0f; ally->z = 0.0f; /* right on top of Duck, but same team */
+
+    srand(1);
+    redgarden_host_duck_smoke_bomb_cast(0);
+
+    CHECK(ally->slowed_ms == 0, "a teammate standing in Duck's own cloud is never slowed -- only enemies");
+}
+
 int main(void) {
     test_duck_w_cast_via_real_parena_mod();
     test_duck_w_gated_by_cooldown();
@@ -158,6 +236,10 @@ int main(void) {
     test_smoke_cloud_does_not_block_a_viewer_also_inside();
     test_smoke_cloud_expires_and_targeting_resumes();
     test_duck_smoke_decrements_through_real_team_mode_arena_update_teams();
+    test_duck_w_can_slow_an_enemy_caught_in_the_cloud();
+    test_duck_w_slow_chance_is_roughly_fifty_percent();
+    test_duck_w_slow_does_not_hit_an_enemy_outside_the_cloud();
+    test_duck_w_slow_does_not_hit_an_ally();
     printf("\n%s\n", failures == 0 ? "ALL PASS" : "SOME FAILED");
     return failures == 0 ? 0 : 1;
 }

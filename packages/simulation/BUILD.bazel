@@ -32,6 +32,7 @@ cc_library(
     srcs = [
         "abraham_fireball_mod.c",
         "arena_game.c",
+        "bacon_puck_intangible_speed_mod.c",
         "bloodflower_mod.c",
         "build_template_mod.c",
         "duck_smoke_bomb_mod.c",
@@ -41,6 +42,7 @@ cc_library(
     hdrs = [
         "abraham_fireball_mod_host.h",
         "arena_game.h",
+        "bacon_puck_intangible_speed_mod_host.h",
         "bloodflower_mod_host.h",
         "build_template_mod_host.h",
         "duck_smoke_bomb_mod_host.h",
