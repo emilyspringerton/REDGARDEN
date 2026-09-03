@@ -84,6 +84,36 @@ both “help me” and “attack here.”
 node identifies the node; a ground ping shows a world position. A ping that cannot identify its
 referent is not actionable enough to ship.
 
+### 4.5 System-generated objective alerts — resolving S189-03 ("team awareness of Kings")
+
+`EMILY/BACKLOG.md` S189-03: "also my team is unaware of the 4 kings" — S188-01's rendering fix
+made a live King visible to whoever is already looking at it, but nothing tells the rest of the
+team it exists at all. That card's own note left the mechanism undecided pending "a founder
+call" on whether this is the ping system's job. **Founder call, made here**: yes — reuse this
+system's own wire event and presentation grammar rather than inventing a third alert mechanism,
+but as a clearly distinct, **system-generated** category, not a 7th player-pingable type:
+
+- **Trigger**: the exact real moment `arena_tick_kings` (`packages/simulation/arena_game.c`)
+  sets `k->active = 1` — a King's first spawn (`ARENA_KING_SPAWN_DELAY_MS`, 1:00) or any later
+  respawn (`ARENA_KING_RESPAWN_MS`) — is currently silent. The server broadcasts a real event at
+  that instant, to both teams (a King is neutral, contestable by either side — unlike a player
+  ping, this one is never team-scoped).
+- **Shape**: the same `ArenaPingEvent` wire struct (§8), with `sender_owner` set to a reserved
+  sentinel value meaning "the server itself," never a real hero slot — client rendering must be
+  able to tell a system alert apart from a teammate's own call (a distinct icon/color and a real
+  announcer-style audio cue, matching Dota's own "Roshan has spawned" precedent, not the
+  teammate-ping sound). `target_kind`/`target_id` identify the specific camp; `world_x_mm`/`_z_mm`
+  give its real position for the minimap marker once a minimap exists (`GFD-RENDER-NORTH`'s own
+  "procedural minimap is the biggest visual gap" note — this alert's marker is real, buildable
+  scaffolding for that work, not blocked on it: the same fixed, always-known camp positions
+  (`arena_camp_position`) can drive a temporary on-screen directional indicator or HUD banner
+  first, upgraded to a real minimap dot later without changing this event's own shape).
+- **Not** a ping a player or bot can suppress, mute per-sender, or mistake for a tactical call —
+  it has no sender to mute, and §5's spam-control budget doesn't apply to it (it fires at most
+  once per real spawn, already rate-limited by the game's own real spawn timers).
+- Does not replace S189-01's own separate damage-log ask, and doesn't require it either — a real,
+  standalone win on its own.
+
 ## 5. Human interaction and presentation
 
 ### Input
@@ -179,7 +209,15 @@ A bot may emit a ping only when its own legal observation crosses a clear thresh
 - it is outnumbered or has low survivability near a contested objective (`Assist Me` or `Danger`);
 - it sees a reachable, high-value enemy whose squad could plausibly follow (`Attack / Focus`);
 - it loses direct perception of a recently observed enemy (`Enemy Missing`);
-- its commander/squad logic prioritizes holding an allied node (`Hold / Defend`).
+- its commander/squad logic prioritizes holding an allied node (`Hold / Defend`);
+- **it decides to commit to a King (NORTHSTAR §22/Jungle Camps, `ArenaKing`)** — founder,
+  real-time: "if a bot wants to take on a king they can send out a ping to group up before going
+  in." A King is boss-scale (500 HP, ~2x a camp minion's damage — real risk to a lone hero), so a
+  bot should call `Assist Me` at the King's own camp position *before* committing to the pull,
+  the same real "call for backup on a big objective" convention every MOBA jungle already
+  follows — not a new ping type, the existing vocabulary already covers it exactly. Applies
+  symmetrically to a human player: nothing here is bot-only, this is just the bot decision rule
+  for when to use the button a human already has.
 
 Bot pings use the same server budget as humans, plus a conservative per-bot policy cooldown. A
 squad should normally nominate one speaker (for example, the lowest stable owner slot currently

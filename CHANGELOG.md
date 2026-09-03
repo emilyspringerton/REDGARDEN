@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-03 (2)
+
+- Ping System Northstar: resolved S189-03 ("team awareness of Kings") -- the founder call the
+  card's own note left open. A King spawn/respawn (arena_tick_kings, k->active = 1) now broadcasts
+  a real, distinct system-generated alert reusing the ping wire event, never a player-pingable
+  type, with its own icon/sound so it's never mistaken for a teammate's call. Also added a real
+  bot-emission trigger per the founder's own real-time addition: a bot committing to a King should
+  call Assist Me at the camp position first, same convention a human already has -- not a new
+  ping type, the existing vocabulary already covers it. (sess-20260902-2008-ed50169e)
+
 ## 2026-09-03
 
 - Ping System Northstar: added the real, original S189-02 design intent Codex's upstream authoring
