@@ -27,6 +27,7 @@
 #include <string.h>
 #include <signal.h>
 #include <sys/time.h>
+#include <time.h>
 
 #ifdef _WIN32
     #error "matchmaker requires fork(); not supported on Windows yet"
@@ -86,6 +87,11 @@ static int next_game_port = 7100;
 static int lobby_size = 2;
 static int sock = -1;
 static char server_bin[256] = "./build/red_garden_server";
+/* match_mode/DUNGEON_NORTHSTAR.md Milestone 1: 0 for every existing arena/card-RTS lobby
+ * (real, unchanged default), non-zero reserved for a future dungeon server variant -- not
+ * built yet, so this only ever carries 0 today, but the plumbing (CLI flag -> spawn args ->
+ * MatchFoundMsg) is real and in place. */
+static int match_mode = 0;
 
 static int addr_eq(const struct sockaddr_in *a, const struct sockaddr_in *b) {
     return memcmp(&a->sin_addr, &b->sin_addr, sizeof(struct in_addr)) == 0 &&
@@ -127,20 +133,26 @@ static void mark_recently_matched(const struct sockaddr_in *addr, unsigned int n
     recently_matched_count++;
 }
 
-static int spawn_game_server(int port) {
+static int spawn_game_server(int port, unsigned int seed) {
     pid_t pid = fork();
     if (pid < 0) return 0;
     if (pid == 0) {
         char port_str[16];
+        char seed_str[16];
         snprintf(port_str, sizeof(port_str), "%d", port);
+        snprintf(seed_str, sizeof(seed_str), "%u", seed);
         if (lobby_size == 2) {
             /* Matches the original, live-verified invocation exactly --
-               no --lobby-size arg at all for the default card-RTS/1v1 case. */
-            execl(server_bin, server_bin, "--port", port_str, (char *)NULL);
+               no --lobby-size arg at all for the default card-RTS/1v1 case.
+               --seed added for DUNGEON_NORTHSTAR.md Milestone 1 -- red_garden_server/
+               arena_server both silently ignore unrecognized flags today, so this is safe to
+               pass unconditionally even though only arena_server's own srand() actually
+               consumes it so far. */
+            execl(server_bin, server_bin, "--port", port_str, "--seed", seed_str, (char *)NULL);
         } else {
             char lobby_str[16];
             snprintf(lobby_str, sizeof(lobby_str), "%d", lobby_size);
-            execl(server_bin, server_bin, "--port", port_str, "--lobby-size", lobby_str, (char *)NULL);
+            execl(server_bin, server_bin, "--port", port_str, "--lobby-size", lobby_str, "--seed", seed_str, (char *)NULL);
         }
         fprintf(stderr, "MATCHMAKER: failed to exec %s\n", server_bin);
         _exit(127);
@@ -175,11 +187,12 @@ static void try_match(void) {
         queue_count -= lobby_size;
 
         int port = next_game_port++;
-        if (!spawn_game_server(port)) {
+        unsigned int seed = (unsigned int)rand();
+        if (!spawn_game_server(port, seed)) {
             printf("MATCHMAKER: failed to spawn game server on port %d\n", port);
             continue;
         }
-        printf("MATCHMAKER: matched %d players -> spawned server on port %d\n", lobby_size, port);
+        printf("MATCHMAKER: matched %d players -> spawned server on port %d (seed=%u)\n", lobby_size, port, seed);
 
         char buf[sizeof(NetHeader) + sizeof(MatchFoundMsg)];
         NetHeader *h = (NetHeader *)buf;
@@ -187,6 +200,8 @@ static void try_match(void) {
         h->type = PACKET_MATCH_FOUND;
         MatchFoundMsg *msg = (MatchFoundMsg *)(buf + sizeof(NetHeader));
         msg->port = (uint16_t)port;
+        msg->seed = seed;
+        msg->mode = (uint8_t)match_mode;
 
         unsigned int now = now_ms();
         for (int i = 0; i < lobby_size; i++) {
@@ -208,11 +223,19 @@ int main(int argc, char *argv[]) {
             lobby_size = atoi(argv[++i]);
             if (lobby_size < 2) lobby_size = 2;
             if (lobby_size > MAX_QUEUE) lobby_size = MAX_QUEUE;
+        } else if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
+            /* DUNGEON_NORTHSTAR.md Milestone 1 -- no dungeon server binary exists yet, so
+             * "dungeon" is accepted here but nothing downstream does anything with mode=1 today.
+             * Real, honest plumbing ahead of the feature it'll serve, not a working feature. */
+            match_mode = (strcmp(argv[++i], "dungeon") == 0) ? 1 : 0;
         }
     }
 
     setbuf(stdout, NULL);
     signal(SIGCHLD, SIG_IGN); // auto-reap spawned game-server children, avoid zombies
+    /* Per-match seed generation (DUNGEON_NORTHSTAR.md Milestone 1) -- this process never seeded
+     * its own RNG before since it had no real use for rand() prior to this. */
+    srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
 
     sock = socket(AF_INET, SOCK_DGRAM, 0);
     int flags = fcntl(sock, F_GETFL, 0);

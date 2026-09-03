@@ -985,6 +985,8 @@ int main(int argc, char *argv[]) {
     signal(SIGILL, crash_signal_handler);
 #endif
     int port = 7200;
+    unsigned int seed_arg = 0;
+    int have_seed_arg = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             port = atoi(argv[++i]);
@@ -992,6 +994,13 @@ int main(int argc, char *argv[]) {
             lobby_size = atoi(argv[++i]);
             if (lobby_size < 2) lobby_size = 2;
             if (lobby_size > ARENA_MAX_HEROES) lobby_size = ARENA_MAX_HEROES;
+        } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
+            /* DUNGEON_NORTHSTAR.md Milestone 1: "a way to pass a seed... into the spawned
+             * process." The matchmaker now always passes one; when present, use it for this
+             * process's own srand() below instead of time(NULL)^getpid() so a match's RNG
+             * outcomes are reproducible from the seed the matchmaker handed the client too. */
+            seed_arg = (unsigned int)strtoul(argv[++i], NULL, 10);
+            have_seed_arg = 1;
         }
     }
     /* No srand() call existed anywhere in this file before (found while wiring The Cart's real
@@ -1000,7 +1009,7 @@ int main(int argc, char *argv[]) {
        making a "random" delivery completely predictable across restarts on the one binary that
        actually arbitrates real networked matches. apps/arena and apps/arena_bot already seed
        their own local RNG the same way; this was the one binary that never needed it before. */
-    srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
+    srand(have_seed_arg ? seed_arg : ((unsigned int)time(NULL) ^ (unsigned int)getpid()));
     load_ticket_secret();
     load_iduna_agent_config();
     server_net_init(port);

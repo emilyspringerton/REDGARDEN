@@ -85,9 +85,20 @@ typedef struct {
 
 // Sent by the matchmaker after PACKET_MATCH_FOUND's NetHeader: the UDP port
 // of the freshly-spawned red_garden_server instance the client should now
-// connect to (see apps/matchmaker/src/main.c).
+// connect to (see apps/matchmaker/src/main.c). seed/mode added for
+// GoblinFoxDragon/docs2/DUNGEON_NORTHSTAR.md's Milestone 1 ("a way to pass a
+// seed... into the spawned process" / "PACKET_MATCH_FOUND telling the client
+// which mode it's joining") -- real, minimal first slice: seed is generated
+// fresh per match and passed both to the spawned server (--seed) and the
+// client here, so a future dungeon server's generator and the client that
+// joins it can agree on the same instance without a separate round-trip.
+// mode is 0 for every existing arena/card-RTS match (unchanged real
+// behavior) -- a real dungeon server variant is not built yet, so nothing
+// non-zero is ever sent today.
 typedef struct {
     uint16_t port;
+    uint32_t seed;
+    uint8_t mode;
 } MatchFoundMsg;
 
 // ---- apps/arena_server wire structs (2026-07-24 pivot: the MOBA is the
