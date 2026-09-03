@@ -205,6 +205,38 @@ compliance-noise coefficient on the utility adjustment below) rather than leavin
 qualitative — worth building once Bot v0 (mechanical, unconditional-per-rule compliance) is
 proven, not before.
 
+### Response count scales with synergy decay — the real, original design intent (S189-02)
+
+This is the founder's own original ping-system spec (EMILY/BACKLOG.md S189-02, predating this
+document's own upstream Codex authoring, which had no visibility into it): "if i ping the whole
+team shouldnt come over... especially if im winning im assuming my cohesion goes down only 1 or 2
+teamers come to a ping instead of more... considering it when we are behind as a comeback
+mechanism." Concretely: **how many teammates actually converge on a ping is itself part of the
+existing synergy-decay comeback mechanic** (NORTHSTAR §25.3, `arena_state.synergy_tier[team]`,
+already shipped) — not a new, parallel system.
+
+Applies to bot consumption, not human free will (a human teammate can always choose to walk toward
+a ping regardless; this governs the bot side of "how many respond"):
+
+- The convergence-utility bonus a bot's own utility scoring assigns to "go toward this accepted
+  Assist/Attack/Danger ping" is scaled by the *inverse* of the ping sender's team's current
+  `synergy_tier` — tier 0 (full cohesion) gives the full bonus (most in-range, otherwise-idle bots
+  cross the utility threshold to converge); tier `ARENA_SYNERGY_TIER_COUNT - 1` (fully decayed,
+  the tier a winning team drifts toward) gives a heavily dampened bonus, naturally leaving only
+  the one or two closest/highest-existing-utility bots crossing threshold — the real "1 or 2
+  teamers" outcome the founder specified, produced by scaling an existing utility term, not a
+  hard-coded responder cap.
+- This is a direct, mechanical extension of an already-shipped system: no new state, no new
+  server-side timer — `synergy_tier` already re-rolls every `ARENA_SYNERGY_ROLL_INTERVAL_MS` (8s),
+  weighted toward higher (more decayed) tiers the further ahead that team is. A losing team stays
+  near tier 0 more often, so more bots converge on its own pings — the comeback mechanic applies
+  to ping-responsiveness the same way it already applies to move speed/CDR (§25.3's own real
+  buff), without inventing a second lever.
+- Bounded, not absolute: a bot's own higher-priority survival/objective/explicit-squad-commitment
+  override (this section's own bullet list above) still applies first. Synergy decay changes how
+  *tempting* a ping is, never whether an already-critical bot abandons a fight to go sightsee a
+  low-priority call.
+
 ## 8. Network and simulation shape
 
 Use a small, versioned event rather than encoding pings as client UI state:
@@ -292,6 +324,12 @@ give bots a sanitized accepted-event view, rather than letting renderer input mu
 5. **Training ownership:** determine whether pings enter learned bot observations as raw events,
    compressed intent features, or a learned communication channel. Start with the deterministic,
    auditable feature adapter in §7.
+6. **RL-policy ("vector brain") ping awareness:** the founder's own original spec explicitly
+   flagged this as unresolved ("both heuristically and in the vector brain... i dunno"), not a
+   firm requirement — this document commits only to the deterministic heuristic bot (§7's
+   Emission/Consumption, and the synergy-decay response-count mechanic) for v0. Whether/how the
+   trained RL policy (`rl_policy_forward`/`team_rl_policy_forward`, NORTHSTAR §21/§25) should ever
+   observe pings is a real, separate, later decision — don't build it blind.
 
 ## 12. Measure the promise
 

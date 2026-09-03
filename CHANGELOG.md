@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-03
+
+- Ping System Northstar: added the real, original S189-02 design intent Codex's upstream authoring
+  never had visibility into -- ping response COUNT (how many teammates converge) scales with the
+  already-shipped synergy-decay cohesion tier (NORTHSTAR §25.3), a comeback mechanic extension not
+  a new system. Winning/high-decay teams get 1-2 responders per ping; losing/low-decay teams get
+  more. Also flagged RL-policy ("vector brain") ping awareness as a real, separate, explicitly
+  founder-uncertain open question, not committed to for v0. (sess-20260902-2008-ed50169e)
+
 ## 2026-09-02
 
 - Added the Ping System Northstar: a League-style, server-authoritative team ping design for human
