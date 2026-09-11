@@ -1,0 +1,67 @@
+# ops/playbook.toml — REDGARDEN backend services (core :7778 bot-pool matchmaker only).
+#
+# Real, standardized replacement target for redgarden-matchmaker-bots.service/
+# redgarden-bot-pool.service (see EMILY/docs/PARENACLOUD_OPS_NORTHSTAR.md for the full format
+# spec). This directory's own real, live unit files also include several genuine variants of this
+# same pair — redgarden-matchmaker-bots-3v3.service, redgarden-stable-matchmaker-bots.service,
+# redgarden-matchmaker-players.service, and their own bot-pool counterparts — each currently a
+# separately hand-maintained near-duplicate file. Once a real deploy tool exists, each of those
+# becomes this SAME playbook applied with its own small `--values-file` override (a different
+# `lobby_size` for 3v3, a different `listen_port`/working directory for the stable branch) instead
+# of an independently-drifting copy of the whole unit — not modeled as separate [[service]] blocks
+# here, since they're the same two services at different values, not different services.
+#
+# Real, honest, found-live risk, NOT fixed by this file's own existence: the current live
+# redgarden-matchmaker-bots.service still has a REQUIRED (non-optional) EnvironmentFile= line —
+# the identical landmine ECOWAR's own real 5-day-outage incident already proved is dangerous
+# (a missing required EnvironmentFile fails the WHOLE unit's activation, not just the feature the
+# file is actually for). This playbook's own `environment_file.required = false` reflects the
+# CORRECT, already-learned convention, not the file currently deployed — flagged here, not
+# silently patched into the live unit without being asked.
+
+[game]
+name = "redgarden"
+repo = "REDGARDEN"
+
+[[service]]
+name = "matchmaker-bots"
+kind = "persistent"
+description = "REDGARDEN arena matchmaker — bot pool queue"
+binary = "build/red_garden_matchmaker"
+args = ["--listen-port", "{{listen_port}}", "--lobby-size", "{{lobby_size}}",
+        "--server-bin", "{{server_bin}}", "--first-game-port", "{{first_game_port}}"]
+port = "{{listen_port}}"
+environment = { REDGARDEN_TICKET_SECRET = "test-secret-for-vs0-vs1-validation" }
+environment_file = { path = "var/{{env_file_name}}", required = false }
+restart = "on-failure"
+restart_sec = 5
+memory_max = "256M"
+after = ["network-online.target"]
+
+[[service]]
+name = "bot-pool"
+kind = "persistent"
+description = "REDGARDEN arena persistent bot pool"
+binary = "scripts/run_bot_pool.sh"
+args = ["{{bot_count}}"]
+environment = { REDGARDEN_TICKET_SECRET = "test-secret-for-vs0-vs1-validation" }
+after = ["network-online.target", "redgarden-matchmaker-bots.service"]
+wants = ["redgarden-matchmaker-bots.service"]
+start_delay_sec = 2
+restart = "on-failure"
+restart_sec = 5
+memory_max = "256M"
+
+[[service]]
+name = "arena-server"
+kind = "spawned"
+description = "Per-match arena server, spawned on demand by the matchmaker's own --server-bin"
+binary = "build/red_garden_arena_server"
+
+[values]
+listen_port = 7778
+lobby_size = 20
+server_bin = "build/red_garden_arena_server"
+first_game_port = 7300
+bot_count = 19
+env_file_name = "redgarden-iduna-agent.env"
