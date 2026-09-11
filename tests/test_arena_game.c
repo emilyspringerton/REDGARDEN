@@ -4905,6 +4905,58 @@ static void test_shop_sell_fails_on_empty_slot(void) {
     CHECK(arena_state.heroes[0].flow == 500, "a failed sell changes nothing");
 }
 
+/* GFD item database pass (2026-09-11) -- real, functional proof that all 8 new items purchase
+ * correctly and arena_recompute_item_stats picks up every one of their stat fields, not just
+ * that arena_game.c compiles. Five close a real gap (Body/Legs/Feet/Neck/Waist each had exactly
+ * one item before this pass); three are new Weapon-slot items. Item indices 35-42 are this
+ * pass's own fixed catalog-append positions -- see arena_game.c's own ARENA_ITEMS doc comment. */
+static void test_gfd_item_pass_new_items_apply_correct_stats(void) {
+    arena_init_teams();
+    arena_state.heroes[0].team = 0;
+    float sx, sz;
+    arena_shop_position(0, &sx, &sz);
+    arena_state.heroes[0].x = sx; arena_state.heroes[0].z = sz;
+    arena_state.heroes[0].flow = 50000;
+    ArenaHero *h = &arena_state.heroes[0];
+
+    CHECK(ARENA_ITEM_COUNT == 43, "this pass added exactly 8 items, 35 -> 43");
+
+    CHECK(arena_shop_buy(0, 35), "Wizard's Coat purchase succeeds"); /* Body: +80 mp, +10 armor, +3% cdr */
+    CHECK(h->max_mp == ARENA_MP_MAX + 80, "Wizard's Coat's +80 max mp applies");
+    CHECK(h->item_bonus_armor == 10, "Wizard's Coat's +10 armor applies");
+    CHECK(h->item_bonus_cdr_pct == 3, "Wizard's Coat's +3% cdr applies");
+
+    CHECK(arena_shop_buy(0, 36), "Chain Leggings purchase succeeds"); /* Legs: +70 hp, +14 armor */
+    CHECK(h->max_hp == 100 + 70, "Chain Leggings' +70 max hp applies");
+    CHECK(h->item_bonus_armor == 10 + 14, "Chain Leggings' +14 armor stacks with Wizard's Coat's +10 (different slots)");
+
+    CHECK(arena_shop_buy(0, 37), "Boots of Winter purchase succeeds"); /* Feet: +60 mp, +0.5 speed */
+    CHECK(h->max_mp == ARENA_MP_MAX + 80 + 60, "Boots of Winter's +60 max mp stacks with Wizard's Coat's +80");
+    CHECK(h->item_bonus_move_speed > 0.49f && h->item_bonus_move_speed < 0.51f, "Boots of Winter's +0.5 move speed applies");
+
+    CHECK(arena_shop_buy(0, 38), "Mage's Earring purchase succeeds"); /* Neck: +70 mp */
+    CHECK(h->max_mp == ARENA_MP_MAX + 80 + 60 + 70, "Mage's Earring's +70 max mp stacks with the prior two");
+
+    CHECK(arena_shop_buy(0, 39), "Venerer's Belt purchase succeeds"); /* Waist: +12 ad, +2% range */
+    CHECK(h->item_bonus_ad == 12, "Venerer's Belt's +12 ad applies");
+    CHECK(h->item_bonus_attack_range_pct == 2, "Venerer's Belt's +2% attack range applies");
+
+    CHECK(arena_shop_buy(0, 40), "Mikazuki purchase succeeds"); /* Weapon: +34 ad, +5% cdr */
+    CHECK(h->item_bonus_ad == 12 + 34, "Mikazuki's +34 ad stacks with Venerer's Belt's +12 (different slots)");
+    CHECK(h->item_bonus_cdr_pct == 3 + 5, "Mikazuki's +5% cdr stacks with Wizard's Coat's +3%");
+
+    CHECK(arena_shop_buy(0, 41), "Dojigiri purchase replaces Mikazuki in the Weapon slot");
+    CHECK(h->equipped_item[ARENA_ITEM_SLOT_WEAPON] == 41, "Dojigiri is now the equipped weapon");
+    CHECK(h->item_bonus_ad == 12 + 58, "Dojigiri's +58 ad REPLACES Mikazuki's +34 -- same slot, not additive");
+    CHECK(h->item_bonus_cdr_pct == 3, "Mikazuki's +5% cdr is gone now that it's been replaced");
+
+    CHECK(arena_shop_buy(0, 42), "Excalibur purchase replaces Dojigiri in the Weapon slot");
+    CHECK(h->equipped_item[ARENA_ITEM_SLOT_WEAPON] == 42, "Excalibur is now the equipped weapon");
+    CHECK(h->item_bonus_ad == 12 + 50, "Excalibur's +50 ad replaces Dojigiri's +58 -- same slot, not additive");
+    CHECK(h->max_hp == 100 + 70 + 120, "Excalibur's +120 max hp stacks with Chain Leggings' +70 (different slots)");
+    CHECK(h->item_bonus_armor == 10 + 14 + 20, "Excalibur's +20 armor stacks with Wizard's Coat + Chain Leggings");
+}
+
 /* S170-205, founder: "add blink dagger 1400 flow it gives a new keybind on screen for tilda" ->
  * "+6ap +6hp". The one item in the catalog with a real active ability, not just stats -- these
  * tests exercise arena_use_blink directly (equipped_item is set by hand, the same "skip the
@@ -7385,6 +7437,7 @@ int main(void) {
     test_shop_buy_auto_sells_occupied_slot();
     test_shop_sell_refunds_partial_flow_and_clears_slot();
     test_shop_sell_fails_on_empty_slot();
+    test_gfd_item_pass_new_items_apply_correct_stats();
     test_blink_noop_without_dagger_equipped();
     test_blink_dashes_toward_move_target();
     test_blink_toward_close_move_target_does_not_overshoot();

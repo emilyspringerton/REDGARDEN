@@ -262,6 +262,84 @@ const ArenaItemDef ARENA_ITEMS[ARENA_ITEM_COUNT] = {
        improvement, same restraint Haste Trinket's own "make it a modest improvement" precedent
        set, not a build-defining spike. */
     { "Luck of the Draw",   ARENA_ITEM_SLOT_TRINKET, ARENA_ITEM_TIER_GENERIC, 2200,  0,   0,   0,  0, 0.0f, 0,  0, 0, 0, 1 },
+    /* -- GFD item database pass (2026-09-11), founder real-time: "iterate on REDGARDEN add some
+       more items look into the GFD item database for inspiration bring in AD not just AP." Real
+       source, not invented from scratch: GoblinFoxDragon/data/items.json, a genuine FFXI-styled
+       155-item catalog with a real dual stat system -- Attack/STR/DEX (physical) alongside Magic
+       Attack Bonus/INT/MND (magic) -- the actual "AD vs AP" split the founder's own phrasing
+       names. Confirmed with the founder before writing any code: this catalog has NO ability-
+       power-scaling mechanic at all (every hero's Q/W/R deals its own flat, hardcoded damage,
+       unaffected by items -- see this file's own header comment on ArenaItemDef), so "AP" items
+       from GFD are translated onto this catalog's EXISTING mana/cooldown stats (bonus_max_mp,
+       bonus_cdr_pct, bonus_mp_regen_combat) as the closest real "caster" analog, not a new
+       damage-scaling stat -- scope confirmed, not assumed, since retrofitting real ability-power
+       scaling onto all 26 existing hero kits is flagged as real, separate, much larger follow-on
+       work this pass deliberately does not attempt.
+       Five of the eight close a real, concrete gap found by directly counting this catalog:
+       Body (Haubergeon), Legs (Iron Ram Trousers), Feet (Creek F. Boots), Neck (Justice Badge),
+       and Waist (Warwolf Belt) each had exactly ONE item before this pass -- zero real build
+       choice in 5 of 11 slots. Each below is a genuine alternative with a different stat SHAPE,
+       same "not strictly better/worse" discipline Ninja Tekko's own doc comment already
+       established, not a straight upgrade to the slot's existing item. */
+    /* Wizard's Coat (GFD: defense 35, fast_cast 5, int 12, magic_attack_bonus 18) -- a real
+       caster alternative to Haubergeon's flat-armor-only Body item: less raw armor, but a real
+       mana pool plus the same bonus_cdr_pct mechanic Haste Trinket already established
+       (fast_cast's closest real analog), supporting an ability-spam playstyle Haubergeon does
+       nothing for -- same reasoning Empress Hairpin's own doc comment already gives for the Head
+       slot, applied here to Body. */
+    { "Wizard's Coat",      ARENA_ITEM_SLOT_BODY,    ARENA_ITEM_TIER_GENERIC, 1400,  0,   0,  80, 10, 0.0f, 3 },
+    /* Chain Leggings (GFD: defense 22, str 3, vit 2) -- a tankier alternative to Iron Ram
+       Trousers' pure-armor shape: less armor, but a real HP pool on top -- a genuine "which do I
+       need more, mitigation or raw HP" choice, not a strict upgrade either direction. */
+    { "Chain Leggings",     ARENA_ITEM_SLOT_LEGS,    ARENA_ITEM_TIER_GENERIC, 1100,  0,  70,   0, 14, 0.0f },
+    /* Boots of Winter (GFD: evasion 5, int 3, magic_defense_bonus 5, mnd 3, mp 10, vit 2) -- a
+       caster alternative to Creek F. Boots' pure-move-speed shape: less speed, but a real mana
+       pool -- same "different build path, not a straight upgrade" discipline as Ninja Tekko vs.
+       Battle Gloves in the Hands slot. */
+    { "Boots of Winter",    ARENA_ITEM_SLOT_FEET,    ARENA_ITEM_TIER_GENERIC, 1200,  0,   0,  60,  0, 0.5f },
+    /* Mage's Earring (GFD: int 3, mnd 3) -- a plain mana stat stick, Neck's first non-armor
+       option next to Justice Badge. Deliberately does NOT also carry bonus_mp_regen_combat --
+       Luck of the Draw already prices a flat +1 mp_regen_combat at 2200 flow entirely on its own;
+       stacking that same stat cheaply onto a Neck item would undercut Luck of the Draw's own
+       value outright, not offer a genuine alternative. */
+    { "Mage's Earring",     ARENA_ITEM_SLOT_NECK,    ARENA_ITEM_TIER_GENERIC,  900,  0,   0,  70,  0, 0.0f },
+    /* Venerer's Belt (GFD: dex 5, ranged_accuracy 10, store_tp 3) -- an AD/range hybrid, Waist's
+       first alternative to Warwolf Belt's pure-HP shape. Deliberately a SMALLER attack_range_pct
+       than Kite String's own 4% (Kite String prices that entire 4% at 3333 flow standalone) --
+       this is a different equipment slot, so the two stack rather than compete, and pricing this
+       one's range bonus small keeps Kite String's own Trinket-slot value intact rather than
+       undercutting it from a different slot. */
+    { "Venerer's Belt",     ARENA_ITEM_SLOT_WAIST,   ARENA_ITEM_TIER_GENERIC, 1300, 12,   0,   0,  0, 0.0f, 0,  0, 0, 2 },
+    /* Mikazuki (GFD: accuracy 20, attack 55, dex 6, haste 20, str 6) -- real named Japanese
+       katana (Mikazuki Munechika, a real National Treasure, reputed the most beautiful sword in
+       Japan), picked for GFD's own notably high "haste" stat among its named weapons --
+       translated as bonus_cdr_pct (this catalog's own established haste analog, per Haste
+       Trinket's doc comment) alongside a real bonus_ad, a genuine "fast, skirmishing" alternative
+       to this catalog's existing flat-AD-only weapons. WEIRD tier: a real named legendary weapon
+       with a real unusual reputation, same convention Kraken Club/Ridill/Muramasa already
+       established -- stat shape reflects that reputation rather than new RNG this engine still
+       deliberately doesn't have. */
+    { "Mikazuki",           ARENA_ITEM_SLOT_WEAPON,  ARENA_ITEM_TIER_WEIRD,   2400, 34,   0,   0,  0, 0.0f, 5 },
+    /* Dojigiri (GFD: attack 88 -- the single highest raw attack stat among GFD's named weapons).
+       Real named katana (Dojigiri Yasutsuna, one of Japan's "Five Swords Under Heaven," reputed
+       to have slain the demon Shuten-doji) -- translated as this catalog's highest-AD weapon
+       PLUS real mobility, a distinct "mobile duelist" glass cannon rather than a reskin of
+       Muramasa's own existing "huge AD, zero everything else, immobile" shape. WEIRD tier, same
+       real-reputation-into-stat-shape convention as Mikazuki above. Named in plain ASCII
+       ("Dojigiri," not "Dōjigiri") deliberately -- no existing string literal in this file uses a
+       non-ASCII character, and this pass doesn't take on unverified font-rendering risk in
+       apps/arena's own SDL2 text rendering just for a diacritic. */
+    { "Dojigiri",           ARENA_ITEM_SLOT_WEAPON,  ARENA_ITEM_TIER_WEIRD,   2800, 58,   0,   0,  0, 1.0f },
+    /* Excalibur (GFD: accuracy 20, attack 249, defense 25, str 25 -- by a wide margin the
+       single strongest item, of any kind, in GFD's entire 155-item database). The single most
+       famous legendary sword in the source material, translated as this catalog's new flagship:
+       a well-rounded, expensive, powerful AD/armor/HP blend (not a glass cannon like Muramasa/
+       Dojigiri -- Excalibur's real reputation is "the best sword, full stop," not a risky
+       one-note weapon) at this catalog's new highest price, becoming the genuine top of the
+       power curve this pass's real Body/Legs/Feet/Neck/Waist gap-filling and Mikazuki/Dojigiri
+       flavor additions build up toward. WEIRD tier, same real-reputation-into-stat-shape
+       convention as every other named legendary weapon in this catalog. */
+    { "Excalibur",          ARENA_ITEM_SLOT_WEAPON,  ARENA_ITEM_TIER_WEIRD,   4200, 50, 120,   0, 20, 0.0f },
 };
 
 /* Item curriculum: see arena_game.h's own "Item curriculum" section doc comment for the full

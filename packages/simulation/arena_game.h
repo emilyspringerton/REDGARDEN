@@ -1508,7 +1508,19 @@ typedef struct {
 } ArenaItemDef;
 
 extern const ArenaItemDef ARENA_ITEMS[];
-#define ARENA_ITEM_COUNT 35 /* 2026-09-03: was 34 -- +1 for Luck of the Draw (S205-87, founder,
+#define ARENA_ITEM_COUNT 43 /* 2026-09-11: was 35 -- +8, a real GFD-item-database-inspired pass
+    (founder: "iterate on REDGARDEN add some more items look into the GFD item database for
+    inspiration bring in AD not just AP") -- see ARENA_ITEMS' own doc comment above these 8
+    entries for the full design. All 8 use this catalog's EXISTING stat fields only (no new
+    ArenaItemDef member added this pass -- confirmed in scope with the founder before writing
+    code, since REDGARDEN's abilities have no stat-scaling mechanic at all to hook a real new
+    "ability power" stat into, per this header's own long-standing note a few lines below). Five
+    close a real, concrete gap this pass found by directly counting the existing catalog: Body,
+    Legs, Feet, Neck, and Waist each had exactly ONE item -- zero real build choice in 5 of this
+    catalog's 11 slots -- now each has a genuine second option with a different stat shape, not a
+    strict upgrade. Three are new flagship Weapon-slot items (Excalibur becomes this catalog's
+    single most powerful/expensive item, matching its real mythic reputation).
+    2026-09-03: was 34 -- +1 for Luck of the Draw (S205-87, founder,
     cruise-queue: "we should have a weapon that is on like page 5 for 2.2k flow a trinket called
     'luck of the draw' that gives some mana regen during combat"), appended at the end of the
     catalog, same "indices stay stable" convention every prior append already used. Real, honest
