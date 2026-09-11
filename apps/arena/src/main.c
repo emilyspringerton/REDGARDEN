@@ -801,6 +801,7 @@ static void net_poll_snapshots(uint32_t now_ms) {
                     dst->r_zone_z = chunk->heroes[j].r_zone_z;
                     dst->r_active_ms = chunk->heroes[j].r_active_ms;
                     dst->zone_radius = (float)chunk->heroes[j].zone_radius_x10 / 10.0f; /* S202-42 -- Cart only, 0 for every other hero */
+                    dst->shield_hp = chunk->heroes[j].shield_hp; /* Michael's Heaven's Shield, 2026-09-11 -- 0 for every other hero */
                     dst->casting_slot = chunk->heroes[j].casting_slot; /* S170-203 */
                     dst->cast_time_remaining_ms = chunk->heroes[j].cast_time_remaining_ms;
                     dst->cast_total_ms = chunk->heroes[j].cast_total_ms;

@@ -525,6 +525,7 @@ static void fill_hero_snapshot(ArenaHeroSnapshot *hs, const ArenaHero *h) {
     hs->r_zone_z = h->r_zone_z;
     hs->r_active_ms = (uint16_t)(h->r_active_ms > 0 ? h->r_active_ms : 0);
     hs->zone_radius_x10 = (h->hero_id == ARENA_HERO_CART) ? (uint8_t)(h->zone_radius * 10.0f) : 0; /* S202-42 */
+    hs->shield_hp = (uint16_t)(h->shield_hp > 0 ? h->shield_hp : 0); /* Michael's Heaven's Shield, 2026-09-11 */
     hs->casting_slot = (uint8_t)h->casting_slot; /* S170-203 */
     hs->cast_time_remaining_ms = (uint16_t)(h->cast_time_remaining_ms > 0 ? h->cast_time_remaining_ms : 0);
     hs->cast_total_ms = (uint16_t)(h->cast_total_ms > 0 ? h->cast_total_ms : 0);

@@ -321,8 +321,26 @@ typedef enum {
                               lore, same shape §16.1 already built for Donkey -- not a WC3-style
                               directly-commanded unit. §24's own Milestone 2 goal (a real
                               directly-controlled-unit hero) stays open after this. */
+    ARENA_HERO_MICHAEL = 30, /* TYLER multiverse_heroes.md #124, "Michael, the Recast Victory"
+                                 (2026-09-11). Founder real-time: "add Michael (arch angel
+                                 michael) to REDGARDEN he should have a very strong shield
+                                 activated on W and a general strong Q (damage) and then E should
+                                 be a heal like DOC WHEEL." This engine has no E slot (Q/W/R
+                                 only) -- "E" mapped onto R, the roster's own ultimate slot, same
+                                 as every other hero's third ability. Q (Flaming Sword) is a real
+                                 strong single-target hit, notably above this roster's own typical
+                                 8-15 Q damage range. W (Heaven's Shield) is this roster's first
+                                 REAL damage-absorption shield (not simplified away like Doc
+                                 Wheel's own R was, see ArenaHero.shield_hp's own doc comment) --
+                                 self-targeted, a genuinely new engine mechanic, not a reskin of
+                                 an existing stat. R (Recast Victory) reuses Doc Wheel's own
+                                 Bedside Manner SHAPE exactly (ally-targeted, heals more the more
+                                 hurt the target is) at bigger numbers and an ultimate-tier
+                                 cooldown, matching the founder's own "like Doc Wheel" ask while
+                                 fitting the R slot's own established "big, cooldown-gated payoff"
+                                 convention every other hero's R already holds to. */
 } ArenaHeroID;
-#define ARENA_HERO_COUNT 30
+#define ARENA_HERO_COUNT 31
 
 /* The Unicorn — first real hero kit wired in (S170-18). */
 #define ARENA_UNICORN_ARMOR         4    /* passive: Chassis Claim, flat dmg reduction */
@@ -1062,6 +1080,38 @@ typedef enum {
 #define ARENA_CART_DELIVERY_OUTCOME_KING_BUFF   4
 /* Per-slot outcome weights (ARENA_CART_DELIVERY_W_WEIGHTS/R_WEIGHTS) live in arena_game.c, next
  * to cart_trigger_delivery -- the one real consumer, not header-wide state. */
+
+/* Michael (2026-09-11): see ARENA_HERO_MICHAEL's own doc comment above for the full founder-quote
+ * and design trail. Q (Flaming Sword): single-target direct damage, deliberately above this
+ * roster's typical Q range (most land 8-15, see e.g. ARENA_GUNNR_Q_DAMAGE/ARENA_ABRAHAM_Q_DAMAGE)
+ * -- "a general strong Q" was explicit in the ask. Cooldown/range sit mid-pack so the bigger
+ * number trades against cast frequency rather than just being strictly better. */
+#define ARENA_MICHAEL_Q_DAMAGE       22
+#define ARENA_MICHAEL_Q_RANGE        5.5f
+#define ARENA_MICHAEL_Q_COOLDOWN_MS  4500
+/* W (Heaven's Shield): self-targeted, sets shield_hp/shield_ms_remaining (see ArenaHero's own
+ * doc comment for the real absorption mechanic this drives). 60 shield HP against a 100 base HP
+ * pool is a genuinely "very strong" chunk for its 4-second window, matching the founder's own
+ * framing; the long cooldown (mid-pack for this roster's own biggest W-slot tools, e.g.
+ * ARENA_DOC_WHEEL_W_COOLDOWN_MS/ARENA_DUCK_W_COOLDOWN_MS) keeps it a real cooldown-gated decision,
+ * not a permanently-on damage reduction. */
+#define ARENA_MICHAEL_W_SHIELD_AMOUNT     60
+#define ARENA_MICHAEL_W_SHIELD_DURATION_MS 4000
+#define ARENA_MICHAEL_W_COOLDOWN_MS       15000
+/* R (Recast Victory): reuses Doc Wheel's own Bedside Manner SHAPE exactly -- ally-targeted
+ * (arena_hover_ally_or_nearest, same real mouseover-or-nearest targeting), heals more the more
+ * hurt the target is (BASE at 100% target hp, scaling up to LOW_HP at ~0%). Bigger numbers than
+ * Doc Wheel's own Q (ARENA_DOC_WHEEL_Q_HEAL_BASE/LOW_HP = 14/28) and an ultimate-tier cooldown
+ * (this roster's R slot is consistently its biggest, slowest payoff -- 15-30s across the board,
+ * see e.g. ARENA_DOC_WHEEL_R_COOLDOWN_MS) rather than Doc Wheel's own much shorter Q cooldown --
+ * Michael isn't a dedicated healer spamming this every few seconds, it's his one big defining
+ * rescue tool, matching how every other hero's R already behaves on this roster. Named after the
+ * character's own TYLER lore epithet (multiverse_heroes.md #124) on purpose: an ally handed back
+ * their own healthy state reads as its own small "recast," the one payoff Michael's own lore
+ * entry says he never gets to have himself. */
+#define ARENA_MICHAEL_R_HEAL_BASE    30
+#define ARENA_MICHAEL_R_HEAL_LOW_HP  55
+#define ARENA_MICHAEL_R_COOLDOWN_MS  18000
 
 /* Vassago (S170-93): passive small HP regen, always on, same shape as Dagda's Undry -- ambient
  * restorative foresight, sensing and softening harm before it fully lands. Q a ranged bolt,
@@ -2120,6 +2170,19 @@ typedef struct {
      * it's the entire point of the ability, using the same centralized
      * apply_damage() every damage call site already routes through. */
     int survive_floor_ms;
+    /* shield_hp/shield_ms_remaining (Michael's W, "Heaven's Shield," 2026-09-11): this roster's
+     * first REAL damage-absorption shield -- apply_damage_ex drains shield_hp before touching
+     * real hp, at the exact same central choke point survive_floor_ms's own doc comment already
+     * names. Not a simplified-away stand-in like Doc Wheel's own R ("teamwide heal, simplified
+     * from a shield -- shields would be a new generic damage-absorption mechanic," see
+     * ARENA_DOC_WHEEL_R_HEAL's own doc comment): that exact deferred mechanic is what this is.
+     * Generic, any hero's kit could apply it, same "status effect any kit could use" reasoning as
+     * every other field on this struct -- Michael is simply the first to. shield_ms_remaining
+     * decays like every other timed status effect above; the shield disappears when it expires,
+     * whether or not it was ever fully broken (a real MOBA-standard shield shape, not a
+     * permanent buff). */
+    int shield_hp;
+    int shield_ms_remaining;
     /* stunned_ms (S170-184, founder: "add more status effects use GFD [as a reference]" --
      * GoblinFoxDragon's server/status package, Paralyze). > 0: cannot move, cannot cast
      * Q/W/R, cannot auto-attack -- the generic "hard CC" hero_status_label's own doc comment

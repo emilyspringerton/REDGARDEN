@@ -1809,6 +1809,16 @@ static int arena_multikill_fib(int n) {
 static void apply_damage_ex(ArenaHero *target, int amount, ArenaHeroID source_hero_id) {
     target->damaged_this_tick = 1;
     target->combat_timer_ms = ARENA_COMBAT_TIMEOUT_MS; /* S170-148: any damage taken re-arms the "in combat" window, gating mana regen */
+    if (target->shield_hp > 0) {
+        /* Michael's Heaven's Shield (2026-09-11): this roster's first real damage-absorption
+           shield -- see ArenaHero.shield_hp's own doc comment. Drains before real hp is touched;
+           logged/reported damage below is the REAL amount that actually reduced hp, not the raw
+           pre-shield amount, matching "this is what actually happened to the target" for both
+           the damage log and any future HUD/replay reading of it. */
+        int absorbed = (amount < target->shield_hp) ? amount : target->shield_hp;
+        target->shield_hp -= absorbed;
+        amount -= absorbed;
+    }
     target->hp -= amount;
     arena_log_damage(target->hero_id, source_hero_id, amount); /* S189-01 */
     if (target->hp <= 0) {
@@ -4112,6 +4122,30 @@ static void doc_wheel_heal_and_cleanse(ArenaHero *target, int amount) {
     target->silenced_ms = 0; /* Bedside Manner: "cleanses one debuff" -- the only debuff arena has today */
 }
 
+/* michael_heal_amount: Recast Victory -- reuses doc_wheel_heal_amount's own exact SHAPE (linear
+ * scale from BASE at 100% target HP up to LOW_HP at 0%), at Michael's own bigger numbers (see
+ * ARENA_MICHAEL_R_HEAL_BASE/LOW_HP's own doc comment). Not parameterized/shared with Doc Wheel's
+ * own function -- kept as its own small function, same "one function per hero's own named
+ * constants" convention this file already uses throughout, rather than a generic helper neither
+ * call site needs yet. */
+static int michael_heal_amount(const ArenaHero *target) {
+    if (target->max_hp <= 0) return ARENA_MICHAEL_R_HEAL_BASE;
+    float hp_pct = (float)target->hp / (float)target->max_hp;
+    if (hp_pct < 0.0f) hp_pct = 0.0f;
+    if (hp_pct > 1.0f) hp_pct = 1.0f;
+    float heal = ARENA_MICHAEL_R_HEAL_BASE +
+                 (ARENA_MICHAEL_R_HEAL_LOW_HP - ARENA_MICHAEL_R_HEAL_BASE) * (1.0f - hp_pct);
+    return (int)heal;
+}
+
+/* michael_heal: plain heal, no cleanse -- unlike Doc Wheel's own Bedside Manner (whose cleanse is
+ * that specific character's own "extremely good at medicine" flavor), Recast Victory is just the
+ * heal-shape borrowed, not the cleanse side effect that comes with it. */
+static void michael_heal(ArenaHero *target, int amount) {
+    target->hp += amount;
+    if (target->hp > target->max_hp) target->hp = target->max_hp;
+}
+
 /* tree_cast_q: Vine Lash, simplified from "AoE root in a cone in front" to
  * an instant hit-if-in-range check, same precedent as Ghost's Alien
  * Frequency. Returns 1 if it landed (cooldown only consumed on a hit), 0 on
@@ -4718,6 +4752,17 @@ static int gunnr_cast_q(ArenaHero *gunnr, ArenaHero *foe) {
     return 1;
 }
 
+/* michael_cast_q: Flaming Sword -- plain single-target damage, same shape as Gunnr's Q, at a
+ * deliberately higher damage number (see ARENA_MICHAEL_Q_DAMAGE's own doc comment). Returns 1 if
+ * it landed. */
+static int michael_cast_q(ArenaHero *michael, ArenaHero *foe) {
+    if (!hero_is_hittable(foe)) return 0;
+    float dx = foe->x - michael->x, dz = foe->z - michael->z;
+    if (sqrtf(dx * dx + dz * dz) > ARENA_MICHAEL_Q_RANGE) return 0;
+    apply_damage(foe, apply_armor(ARENA_MICHAEL_Q_DAMAGE, arena_hero_armor(foe)));
+    return 1;
+}
+
 /* warrior_cast_q: Hard Slash -- real DragonsNShit Great Sword weapon skill (Scission), plain
  * melee-range damage, same shape as Gunnr's Q. Routes through apply_weapon_skill_damage (not a
  * bare apply_damage/apply_armor pair) so it can open/close a real skillchain window on its
@@ -5229,6 +5274,12 @@ void arena_cast_q(int owner) {
         h->q_cooldown_ms = cast_cooldown(h, ARENA_CART_Q_COOLDOWN_MS);
         h->mp -= ARENA_MP_COST_Q;
         break;
+    case ARENA_HERO_MICHAEL:
+        if (michael_cast_q(h, foe)) {
+            h->q_cooldown_ms = cast_cooldown(h, ARENA_MICHAEL_Q_COOLDOWN_MS);
+            h->mp -= ARENA_MP_COST_Q;
+        }
+        break;
     }
 }
 
@@ -5544,6 +5595,16 @@ void arena_toggle_w(int owner) {
         h->r_active_ms = ARENA_CART_W_DURATION_MS;
         h->zone_radius = ARENA_CART_W_RADIUS;
         h->w_cooldown_ms = cast_cooldown(h, ARENA_CART_W_COOLDOWN_MS);
+        h->mp -= ARENA_MP_COST_W;
+        break;
+    case ARENA_HERO_MICHAEL:
+        /* Heaven's Shield: self-targeted, no foe/ally needed -- same "instant self-buff on a
+           real cooldown" shape as Ghost's own Not a Ghost (W). See ArenaHero.shield_hp's own doc
+           comment for the real absorption mechanic this activates. */
+        if (h->w_cooldown_ms > 0 || h->mp < ARENA_MP_COST_W) return;
+        h->shield_hp = ARENA_MICHAEL_W_SHIELD_AMOUNT;
+        h->shield_ms_remaining = ARENA_MICHAEL_W_SHIELD_DURATION_MS;
+        h->w_cooldown_ms = cast_cooldown(h, ARENA_MICHAEL_W_COOLDOWN_MS);
         h->mp -= ARENA_MP_COST_W;
         break;
     default:
@@ -5880,6 +5941,21 @@ void arena_cast_r(int owner) {
         h->r_cooldown_ms = cast_cooldown(h, ARENA_CART_R_COOLDOWN_MS);
         h->mp -= ARENA_MP_COST_R;
         break;
+    case ARENA_HERO_MICHAEL: {
+        /* Recast Victory: single-target ally heal, same real targeting (hovered ally, falling
+           back to nearest) and "whiff doesn't cost you the cooldown" convention as Doc Wheel's
+           own Bedside Manner (Q) -- see michael_heal_amount's own doc comment for the shared
+           heal-shape math. No ally (1v1, or ally already dead) -- no-op, same as Doc Wheel/
+           Vassago/He Xiangu's own ally-only slots. */
+        if (h->r_cooldown_ms > 0 || h->mp < ARENA_MP_COST_R) return;
+        ArenaHero *ally = arena_hover_ally_or_nearest(owner);
+        if (ally && ally->alive) {
+            michael_heal(ally, michael_heal_amount(ally));
+            h->r_cooldown_ms = cast_cooldown(h, ARENA_MICHAEL_R_COOLDOWN_MS);
+            h->mp -= ARENA_MP_COST_R;
+        }
+        break;
+    }
     }
 }
 
@@ -6141,6 +6217,16 @@ static void tick_hero_kit(ArenaHero *h, ArenaHero *foe, ArenaHero *ally, unsigne
     if (h->survive_floor_ms > 0) {
         h->survive_floor_ms -= (int)dt_ms;
         if (h->survive_floor_ms < 0) h->survive_floor_ms = 0;
+    }
+    /* shield_ms_remaining (Michael's W): same generic tick-down idiom as every other status
+       effect here -- the shield disappears once its duration runs out, whether or not it was
+       ever fully broken, a real MOBA-standard shield shape (not a permanent buff). */
+    if (h->shield_ms_remaining > 0) {
+        h->shield_ms_remaining -= (int)dt_ms;
+        if (h->shield_ms_remaining <= 0) {
+            h->shield_ms_remaining = 0;
+            h->shield_hp = 0;
+        }
     }
     /* stunned_ms/slowed_ms (S170-184): same generic tick-down idiom as every other status
        effect above. slow_pct isn't reset when slowed_ms hits 0 -- update_hero_motion only ever
@@ -6971,6 +7057,17 @@ void bot_cast_kit_if_ready(ArenaHero *bot, ArenaHero *foe) {
         } else if (bot->w_cooldown_ms <= 0) {
             arena_toggle_w(bot->owner);
         } else if (bot->q_cooldown_ms <= 0 && bot->hp < bot->max_hp) {
+            arena_cast_q(bot->owner);
+        }
+        break;
+    case ARENA_HERO_MICHAEL:
+        /* R (heal) is ally-only -- no useful action in the 1v1 local demo's bot heuristic (no
+           ally present), same reasoning as Doc Wheel/Vassago/He Xiangu's own ally-only slots
+           above. W (shield) is defensive, gated on low HP like Cain's own dash-away, not
+           proximity to a foe. Q whenever in range and off cooldown. */
+        if (bot->hp < bot->max_hp / 3 && bot->w_cooldown_ms <= 0) {
+            arena_toggle_w(bot->owner);
+        } else if (bot->q_cooldown_ms <= 0 && dist <= ARENA_MICHAEL_Q_RANGE) {
             arena_cast_q(bot->owner);
         }
         break;

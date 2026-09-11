@@ -3949,6 +3949,137 @@ static void test_cart_zone_can_trigger_on_the_cart_itself(void) {
     arena_bot_enabled = 1; /* restore the default for any test run after this one */
 }
 
+/* Michael (2026-09-11, founder real-time: "add Michael (arch angel michael) to REDGARDEN he
+ * should have a very strong shield activated on W and a general strong Q (damage) and then E
+ * should be a heal like DOC WHEEL"). Q is a plain in-range damage hit, same shape as Gunnr's;
+ * W is this roster's first REAL damage-absorption shield, the actual new mechanic this pass adds
+ * to the engine, not just to one hero -- tested directly against apply_damage_ex, not just that
+ * shield_hp gets set; R reuses Doc Wheel's own ally-heal shape (mirrors that hero's own test
+ * pattern below almost exactly, same targeting/no-op-with-no-ally convention). */
+static void test_michael_q_damages_in_range(void) {
+    arena_init_with_heroes(ARENA_HERO_DUCK, ARENA_HERO_MICHAEL); /* Duck: 0 base armor, exact hit-damage math (see test_melee_windup_completes_and_deals_damage's own comment) */
+    ArenaHero *michael = &arena_state.heroes[1];
+    ArenaHero *foe = &arena_state.heroes[0];
+    foe->x = michael->x + 3.0f; /* within ARENA_MICHAEL_Q_RANGE */
+    foe->z = michael->z;
+    int foe_hp_before = foe->hp;
+
+    arena_cast_q(1);
+
+    CHECK(foe->hp < foe_hp_before, "Flaming Sword damages the foe when in range");
+    CHECK(foe_hp_before - foe->hp == ARENA_MICHAEL_Q_DAMAGE, "the landed hit deals exactly ARENA_MICHAEL_Q_DAMAGE before armor");
+    CHECK(michael->q_cooldown_ms == ARENA_MICHAEL_Q_COOLDOWN_MS, "Q starts on cooldown after a landed hit");
+}
+
+static void test_michael_q_out_of_range_whiffs(void) {
+    arena_init_with_heroes(ARENA_HERO_DUCK, ARENA_HERO_MICHAEL);
+    ArenaHero *michael = &arena_state.heroes[1];
+    ArenaHero *foe = &arena_state.heroes[0];
+    foe->x = michael->x + ARENA_MICHAEL_Q_RANGE + 5.0f;
+    foe->z = michael->z;
+    int foe_hp_before = foe->hp;
+
+    arena_cast_q(1);
+
+    CHECK(foe->hp == foe_hp_before, "Q out of range does not damage the foe");
+    CHECK(michael->q_cooldown_ms == 0, "Q out of range does not start its cooldown");
+}
+
+static void test_michael_w_shield_absorbs_damage_before_hp(void) {
+    /* The real point of this pass: apply_damage_ex must drain shield_hp before touching real hp
+       at all, not just set the field and leave the actual damage pipeline untouched. Exercised
+       via a real ability cast (Gunnr's own Q, a known exact ARENA_GUNNR_Q_DAMAGE hit at 0 armor)
+       rather than a direct call -- apply_damage/apply_damage_ex are static to arena_game.c, same
+       as every other internal helper in this file, and this codebase's own established
+       convention (see test_melee_windup_completes_and_deals_damage) is to exercise the real
+       damage pipeline through a real ability/attack, never widen internal visibility just to
+       make a test more convenient. ARENA_MICHAEL_W_SHIELD_AMOUNT (60) is an exact multiple of
+       ARENA_GUNNR_Q_DAMAGE (10), so six identical hits land exactly on the shield's own boundary
+       -- deterministic, no loop-and-ceil arithmetic needed. */
+    arena_init_with_heroes(ARENA_HERO_GUNNR, ARENA_HERO_MICHAEL);
+    ArenaHero *gunnr = &arena_state.heroes[0];
+    ArenaHero *michael = &arena_state.heroes[1];
+    gunnr->x = michael->x + 1.0f; /* within ARENA_GUNNR_Q_RANGE (melee) */
+    gunnr->z = michael->z;
+    int hp_before = michael->hp;
+
+    arena_toggle_w(1);
+    CHECK(michael->shield_hp == ARENA_MICHAEL_W_SHIELD_AMOUNT, "Heaven's Shield sets shield_hp to the full amount");
+    CHECK(michael->shield_ms_remaining == ARENA_MICHAEL_W_SHIELD_DURATION_MS, "Heaven's Shield sets its own duration");
+    CHECK(michael->w_cooldown_ms == ARENA_MICHAEL_W_COOLDOWN_MS, "Heaven's Shield starts on cooldown");
+
+    /* Six identical 10-damage hits = 60 total = exactly the shield amount. mp reset every cast
+       (not just cooldown) -- ARENA_MP_COST_Q (20) against ARENA_MP_MAX (100) only allows 5 real
+       casts otherwise, which would silently under-count the real number of landed hits. */
+    for (int i = 0; i < 6; i++) {
+        gunnr->q_cooldown_ms = 0;
+        gunnr->mp = ARENA_MP_MAX;
+        arena_cast_q(0);
+    }
+    CHECK(michael->hp == hp_before, "hits totalling exactly the shield amount are fully absorbed, real hp untouched");
+    CHECK(michael->shield_hp == 0, "the shield is exactly fully consumed by hits summing to its own amount");
+
+    /* A 7th identical hit lands with the shield already at 0 -- reaches real hp normally, same as
+       if no shield had ever been up. */
+    gunnr->q_cooldown_ms = 0;
+    gunnr->mp = ARENA_MP_MAX;
+    arena_cast_q(0);
+    CHECK(hp_before - michael->hp == ARENA_GUNNR_Q_DAMAGE, "once the shield is fully gone, a further hit reaches real hp exactly like normal");
+}
+
+static void test_michael_w_shield_expires_after_duration(void) {
+    arena_init_with_heroes(ARENA_HERO_UNICORN, ARENA_HERO_MICHAEL);
+    arena_bot_enabled = 0; /* controlled tick, no bot interference -- same convention Cart's own zone tests above use */
+    ArenaHero *michael = &arena_state.heroes[1];
+
+    arena_toggle_w(1);
+    CHECK(michael->shield_hp > 0, "sanity: the shield is actually up before the duration test runs");
+
+    arena_update(ARENA_MICHAEL_W_SHIELD_DURATION_MS + 100);
+
+    CHECK(michael->shield_ms_remaining == 0, "the shield's duration fully ticks down");
+    CHECK(michael->shield_hp == 0, "the shield disappears once its duration expires, even though it was never fully broken");
+    arena_bot_enabled = 1; /* restore the default for any test run after this one */
+}
+
+static void test_michael_r_heals_ally_more_at_lower_hp(void) {
+    /* Mirrors test_doc_wheel_q_heals_more_at_lower_hp's own exact setup shape -- same real
+       ally-targeting mechanic (arena_hover_ally_or_nearest), same heal-shape math, Michael's own
+       bigger numbers. */
+    arena_init_teams();
+    for (int i = 2; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_MICHAEL;
+    arena_state.heroes[0].x = 0; arena_state.heroes[0].z = 0;
+    arena_state.heroes[1].x = 1; arena_state.heroes[1].z = 0;
+    arena_state.heroes[1].max_hp = 100;
+    arena_state.heroes[1].hp = 95; /* near-full HP */
+
+    arena_cast_r(0);
+    int healed_near_full = arena_state.heroes[1].hp - 95;
+
+    arena_state.heroes[0].r_cooldown_ms = 0;
+    arena_state.heroes[1].hp = 10; /* near-empty HP */
+    arena_cast_r(0);
+    int healed_near_empty = arena_state.heroes[1].hp - 10;
+
+    CHECK(healed_near_full > 0, "Recast Victory heals a near-full-HP ally at all");
+    CHECK(healed_near_empty > healed_near_full, "Recast Victory heals more the lower the target's current HP%% is");
+    CHECK(arena_state.heroes[0].r_cooldown_ms == ARENA_MICHAEL_R_COOLDOWN_MS, "R starts on cooldown after a landed heal");
+}
+
+static void test_michael_r_whiffs_with_no_ally_cooldown_not_consumed(void) {
+    /* Mirrors test_doc_wheel_q_whiffs_with_no_ally_cooldown_not_consumed's own exact setup --
+       every other active hero deactivated, so arena_hover_ally_or_nearest finds nobody. */
+    arena_init_teams();
+    for (int i = 1; i < ARENA_MAX_HEROES; i++) arena_state.heroes[i].active = 0;
+    arena_state.heroes[0].hero_id = ARENA_HERO_MICHAEL;
+    arena_state.heroes[0].hp = 100; arena_state.heroes[0].max_hp = 100;
+
+    arena_cast_r(0);
+
+    CHECK(arena_state.heroes[0].r_cooldown_ms == 0, "R with no ally in range does not start its cooldown -- a real whiff, not a wasted cast");
+}
+
 static void test_vassago_passive_regenerates_hp(void) {
     arena_init_with_heroes(ARENA_HERO_UNICORN, ARENA_HERO_VASSAGO);
     ArenaHero *vassago = &arena_state.heroes[1];
@@ -7389,6 +7520,12 @@ int main(void) {
     test_cart_r_zone_is_bigger_and_longer_cooldown_than_w();
     test_cart_zone_triggers_delivery_on_contact_then_deactivates();
     test_cart_zone_can_trigger_on_the_cart_itself();
+    test_michael_q_damages_in_range();
+    test_michael_q_out_of_range_whiffs();
+    test_michael_w_shield_absorbs_damage_before_hp();
+    test_michael_w_shield_expires_after_duration();
+    test_michael_r_heals_ally_more_at_lower_hp();
+    test_michael_r_whiffs_with_no_ally_cooldown_not_consumed();
     test_vassago_passive_regenerates_hp();
     test_vassago_q_damages_and_silences_in_range();
     test_vassago_q_out_of_range_whiffs();

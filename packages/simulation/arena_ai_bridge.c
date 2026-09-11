@@ -36,6 +36,7 @@ const char *arena_hero_name(ArenaHeroID hero_id) {
     case ARENA_HERO_ZAGAN:   return "zagan";
     case ARENA_HERO_WARRIOR: return "warrior";
     case ARENA_HERO_CART:    return "cart";
+    case ARENA_HERO_MICHAEL: return "michael";
     default:                 return "unknown";
     }
 }
@@ -110,6 +111,7 @@ const char *arena_ability_name(ArenaHeroID hero_id, int slot) {
         [ARENA_HERO_ZAGAN]      = {"CALCINATION", "THE STANDSTILL", "CONJUNCTION"},
         [ARENA_HERO_WARRIOR]    = {"HARD SLASH", "POWER SLASH", "FROSTBITE"}, /* real DragonsNShit Great Sword weapon skills, not invented lore names -- REDGARDEN_GUI_NORTHSTAR.md Milestone 1 */
         [ARENA_HERO_CART]       = {"MAINTENANCE", "NO REQUESTER IN THE LEDGER", "ALREADY WAITING"}, /* NORTHSTAR §24 Milestone 2 -- W/R names drawn from the character's own real seed phrase/lore framing, TYLER multiverse_heroes.md #10 */
+        [ARENA_HERO_MICHAEL]    = {"FLAMING SWORD", "HEAVEN'S SHIELD", "RECAST VICTORY"}, /* R named after the character's own TYLER lore epithet, multiverse_heroes.md #124 */
     };
     if (hero_id < 0 || hero_id >= ARENA_HERO_COUNT || slot < 0 || slot > 2) return "?";
     const char *name = NAMES[hero_id][slot];
@@ -153,6 +155,7 @@ const char *arena_ability_description(ArenaHeroID hero_id, int slot) {
         [ARENA_HERO_ZAGAN]      = {"DAMAGE + LINGERING ARMOR SHRED", "STUN A NEARBY FOE", "MIRROR A FOE'S ARMOR FOR A WINDOW"},
         [ARENA_HERO_WARRIOR]    = {"MELEE-RANGE DIRECT STRIKE", "HARDER MELEE-RANGE STRIKE", "HARDEST MELEE-RANGE STRIKE"},
         [ARENA_HERO_CART]       = {"SMALL SELF-HEAL", "ZONE: RANDOM DELIVERY, ANYONE CAN TRIGGER IT", "BIGGER ZONE, SAME RANDOM DELIVERY"},
+        [ARENA_HERO_MICHAEL]    = {"STRONG DIRECT DAMAGE HIT", "SELF: STRONG TEMPORARY SHIELD", "HEAL ALLY, MORE AT LOW TARGET HP"},
     };
     if (hero_id < 0 || hero_id >= ARENA_HERO_COUNT || slot < 0 || slot > 2) return "?";
     const char *desc = DESC[hero_id][slot];
@@ -179,6 +182,14 @@ typedef struct {
     int has_heal;          /* heals self or an ally, anywhere in the kit */
     int has_dash;          /* gap-closer, blink, or forced self-reposition */
     int has_stealth;       /* grants intangibility/untargetability */
+    /* has_shield (2026-09-11, Michael's Heaven's Shield): grants real damage-absorption shield_hp
+     * anywhere in the kit -- a mechanically distinct shape from has_heal (heal reduces damage
+     * ALREADY taken, a shield prevents it from landing at all), so a bot's engagement calculus
+     * against a shielded hero should genuinely differ from one against a healer. Appended at the
+     * end (positional initializers with fewer values than members zero-fill the rest in standard
+     * C), same convention this file's own ArenaItemDef precedent already established -- none of
+     * the existing 30 heroes' own rows below needed touching. */
+    int has_shield;
 } ArenaHeroTags;
 
 static const ArenaHeroTags ARENA_HERO_TAGS[ARENA_HERO_COUNT] = {
@@ -212,6 +223,7 @@ static const ArenaHeroTags ARENA_HERO_TAGS[ARENA_HERO_COUNT] = {
     [ARENA_HERO_ZAGAN]      = { 1, 0, 0, 0, 0, 0 }, /* Q is a real ranged poke (5.0 range, same "instant-hit-if-in-range" shape as Tree/Ghost/Pizza); no heal/knockback/dash/stealth anywhere in the kit */
     [ARENA_HERO_WARRIOR]    = { 0, 0, 0, 0, 0, 0 }, /* all three real weapon skills are melee-range hits, no ranged/knockback/heal/dash/stealth tool anywhere in the kit */
     [ARENA_HERO_CART]       = { 1, 0, 0, 1, 0, 0 }, /* W/R are zone-shaped (reads ranged); Q and a possible delivery roll both heal -- has_heal true; no knockback/dash/stealth anywhere in the kit */
+    [ARENA_HERO_MICHAEL]    = { 1, 0, 0, 1, 0, 0, 1 }, /* Q is a real ranged poke (5.5 range, same "instant-hit-if-in-range" shape as Tree/Abraham/Flamel/Zagan); R heals an ally; W grants a real shield -- this roster's first has_shield=1 */
 };
 
 /* arena_hero_tags_string writes a space-separated list of hero_id's TRUE tags into out (empty
@@ -234,6 +246,7 @@ void arena_hero_tags_string(ArenaHeroID hero_id, char *out, size_t out_len) {
     if (t->has_heal) APPEND("has_heal");
     if (t->has_dash) APPEND("has_dash");
     if (t->has_stealth) APPEND("has_stealth");
+    if (t->has_shield) APPEND("has_shield");
 #undef APPEND
 }
 

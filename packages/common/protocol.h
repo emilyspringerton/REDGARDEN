@@ -417,6 +417,16 @@ typedef struct {
     // battlefield should read clearly" convention as every other field here.
     float duck_smoke_x, duck_smoke_z;
     uint16_t duck_smoke_ms;
+    // shield_hp (2026-09-11, Michael's Heaven's Shield): this roster's first real
+    // damage-absorption shield -- real simulation state (ArenaHero.shield_hp) that would
+    // otherwise have zero wire representation, same "the whole battlefield should read clearly"
+    // convention as every other per-hero field on this struct. shield_ms_remaining isn't synced
+    // separately: a networked client only needs to know HOW MUCH shield is left to render it,
+    // not exactly when it expires (same "lossy is fine, the number that matters is the amount"
+    // precedent zone_radius_x10/slow_pct_x100 already establish for their own fields) -- shield_hp
+    // itself already reads as 0 the instant the shield is gone, whether from expiry or being
+    // fully absorbed.
+    uint16_t shield_hp;
 } ArenaHeroSnapshot;
 
 // ARENA_SNAPSHOT_MAX_HEROES must match packages/simulation/arena_game.h's
