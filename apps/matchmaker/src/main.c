@@ -84,6 +84,26 @@ static unsigned int now_ms(void) {
 }
 static int listen_port = 7777;
 static int next_game_port = 7100;
+/* first_game_port/GAME_PORT_RANGE (2026-09-11, real incident: a founder-reported "queued and it
+ * still doesn't work" traced to next_game_port incrementing UNBOUNDED for as long as this process
+ * stays up -- confirmed live via this exact matchmaker's own log, drifted from its real
+ * --first-game-port (7300) all the way to 38674 over 5 days of the persistent 20-bot pool's own
+ * continuous match cycling. A spawned game server binds INADDR_ANY same as this matchmaker
+ * (ruled out as a bind-address bug), so the leading suspect is any external firewall/NAT in front
+ * of this box that only has a bounded range actually opened -- next_game_port drifting arbitrarily
+ * high with uptime will eventually walk outside whatever range that is, no matter what it's set
+ * to, and this process had already been up long enough to do exactly that. Wrapping back to the
+ * original --first-game-port after GAME_PORT_RANGE spawns keeps every game server port inside a
+ * small, stable, predictable window for the life of the process, matching whatever range a real
+ * deployment would actually have provisioned -- real, unconditionally worth fixing regardless of
+ * the exact firewall situation (an ever-growing port number was always going to be a problem on
+ * a long-lived process, up to and including eventually exceeding the valid 16-bit port range).
+ * 200 is comfortably larger than this pool's own real match cadence needs -- matches complete in
+ * minutes, not the hours it'd take to cycle through 200 of them, so wrapping back to a port a
+ * very recently, likely-already-exited match server used is a real but small, accepted risk, not
+ * a redesign of the single global sequential counter into a real free-list. */
+#define GAME_PORT_RANGE 200
+static int first_game_port = 7100;
 static int lobby_size = 2;
 static int sock = -1;
 static char server_bin[256] = "./build/red_garden_server";
@@ -187,6 +207,7 @@ static void try_match(void) {
         queue_count -= lobby_size;
 
         int port = next_game_port++;
+        if (next_game_port >= first_game_port + GAME_PORT_RANGE) next_game_port = first_game_port;
         unsigned int seed = (unsigned int)rand();
         if (!spawn_game_server(port, seed)) {
             printf("MATCHMAKER: failed to spawn game server on port %d\n", port);
@@ -218,7 +239,8 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[i], "--listen-port") == 0 && i + 1 < argc) {
             listen_port = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--first-game-port") == 0 && i + 1 < argc) {
-            next_game_port = atoi(argv[++i]);
+            first_game_port = atoi(argv[++i]);
+            next_game_port = first_game_port;
         } else if (strcmp(argv[i], "--lobby-size") == 0 && i + 1 < argc) {
             lobby_size = atoi(argv[++i]);
             if (lobby_size < 2) lobby_size = 2;
