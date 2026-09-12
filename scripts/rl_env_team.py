@@ -46,9 +46,23 @@ losing to most. When the sampled opponent isn't the heuristic, team B's actions 
 checkpoint's own loaded SB3 model, run against team B's OWN real perspective
 (`sim_get_obs_team_any(..., my_team=1, ...)`) and applied via `sim_step_team_vs_actions` -- the
 exact two C-level primitives this section's own bug-fix pass built as its prerequisite.
+
+League mode (§25.4.1, rl_league.py, founder real-time citing a real AlphaStar league-training
+video): `league_manager`/`league_role` are a real, additive, opt-in EXTENSION of the plain
+autocurriculum above, addressing the "simple self-play -> cyclic dominance" failure mode the
+video names. When `league_manager` is set, opponent sampling and checkpoint registration both
+delegate to rl_league.py's own role-specific logic (sample_for_main/sample_for_main_exploiter/
+sample_for_league_exploiter, LeagueManager's permanent cross-process registry) instead of this
+class's own small, evicting, single-lineage `opponent_pool` -- see rl_league.py's own module doc
+comment for the full design and rl_train_team.py's own `--league`/`--league-role` flags for how
+three separate training processes actually run the three roles concurrently against one shared
+`--league-dir`. `league_manager=None` (the default) is byte-for-byte the pre-existing
+autocurriculum behavior above -- nothing about this class's own prior behavior changes when
+league mode isn't requested.
 """
 
 import argparse
+import collections
 import ctypes
 
 from rl_env import (
@@ -56,6 +70,14 @@ from rl_env import (
     ARENA_TRAINING_OBS_SIZE,
     DEFAULT_LIB_PATH,
     compute_reward,
+)
+from rl_league import (
+    DEFAULT_STRUGGLE_WINDOW,
+    HEURISTIC_ID,
+    LeagueRole,
+    sample_for_league_exploiter,
+    sample_for_main,
+    sample_for_main_exploiter,
 )
 
 # Noisy-gestalt alternating phased training (2026-08-10, founder: "ensure we are doing some of
@@ -171,7 +193,7 @@ try:
         def __init__(self, team_size=DEFAULT_TEAM_SIZE, lib_path=None, dt_ms=16,
                      max_episode_ticks=4000, hero_ids_a=None, hero_ids_b=None,
                      noisy_gestalt=False, gestalt_phase_ticks=DEFAULT_GESTALT_PHASE_TICKS,
-                     autocurriculum=False):
+                     autocurriculum=False, league_manager=None, league_role=None):
             if team_size < 2 or team_size > ARENA_TEAM_SIZE:
                 raise ValueError(f"team_size must be in [2, {ARENA_TEAM_SIZE}], got {team_size}")
             self.team_size = team_size
@@ -209,6 +231,24 @@ try:
             self.opponent_losses = [0]  # team-A losses while this opponent was B
             self._opponent_model_cache = {}  # checkpoint path -> loaded PPO model
             self._current_opponent_idx = 0
+
+            # §25.4.1 league mode (rl_league.py) -- see this module's own doc comment above.
+            # Real, deliberate design: league_manager being set takes priority over the plain
+            # `autocurriculum` pool above (both being set at once shouldn't happen from
+            # rl_train_team.py's own CLI, but if it did, league mode is the real, richer one).
+            self.league_manager = league_manager
+            self.league_role = league_role
+            self._use_league = league_manager is not None
+            self._league_wins = {}    # candidate id (HEURISTIC_ID or a league member id) -> wins
+            self._league_losses = {}  # same keys -> losses
+            self._current_opponent_key = HEURISTIC_ID  # HEURISTIC_ID or a league member id
+            # Main Exploiter's own real struggle-tracking (rl_league.is_struggling_vs_main) --
+            # only ever populated when league_role == MAIN_EXPLOITER; a rolling window of 1/0
+            # outcomes from episodes that specifically challenged the CURRENT (freshest) Main,
+            # not episodes spent climbing down through Main's history (a different matchup, see
+            # rl_league.sample_for_main_exploiter's own doc comment).
+            self._recent_vs_current_main = collections.deque(maxlen=DEFAULT_STRUGGLE_WINDOW)
+            self._challenging_current_main_this_episode = False
 
             self._obs_size = team_obs_size(team_size)
             self._tick = 0
@@ -248,11 +288,23 @@ try:
                     bonus += REWARD_SYNERGY_PER_LIVING_TEAMMATE_NEARBY
             return bonus
 
-        def add_opponent_checkpoint(self, path):
+        def add_opponent_checkpoint(self, path, generation=None):
             """§25.4 autocurriculum -- called from rl_train_team.py's own checkpoint-save loop
             each time a new checkpoint lands, so self-play opponents grow richer as training
             progresses instead of staying fixed at whatever existed when the env was constructed.
-            No-op if autocurriculum is off, so callers don't need to guard every call site."""
+            No-op if autocurriculum is off AND league mode is off, so callers don't need to guard
+            every call site.
+
+            League mode (§25.4.1): registers `path` PERMANENTLY into the shared, cross-process
+            `self.league_manager` under `self.league_role` instead of this class's own small,
+            evicting local pool -- `generation` is required in this mode (rl_train_team.py's own
+            checkpoint-save loop tracks and passes it; see rl_league.LeagueManager.register)."""
+            if self._use_league:
+                if generation is None:
+                    raise ValueError("add_opponent_checkpoint: generation is required in league mode")
+                self.league_manager.register(self.league_role, generation, path)
+                print(f"[league] registered {self.league_role}/gen{generation}: {path}")
+                return
             if not self.autocurriculum:
                 return
             self.opponent_pool.append(path)
@@ -289,11 +341,64 @@ try:
             probs = weights / weights.sum()
             return int(np.random.choice(len(self.opponent_pool), p=probs))
 
+        def _sample_league_opponent(self):
+            """§25.4.1 league mode: dispatches to rl_league.py's own role-specific sampler using
+            THIS process's local win/loss stats (self._league_wins/self._league_losses -- same
+            "each trainee's own local experience biases its own curriculum" architecture the
+            plain autocurriculum pool above already uses, just keyed by league member id instead
+            of pool index). Returns a candidate id (HEURISTIC_ID or a league member id) and also
+            updates self._challenging_current_main_this_episode for Main Exploiter's own real
+            struggle-tracking (see the constructor's own doc comment on
+            self._recent_vs_current_main)."""
+            self._challenging_current_main_this_episode = False
+            if self.league_role == LeagueRole.MAIN_EXPLOITER:
+                current_main = self.league_manager.latest_by_role(LeagueRole.MAIN)
+                picked = sample_for_main_exploiter(
+                    self.league_manager, self._league_wins_losses(),
+                    list(self._recent_vs_current_main),
+                )
+                if picked is None:
+                    return HEURISTIC_ID  # Main hasn't registered a single checkpoint yet
+                if current_main is not None and picked == current_main.id:
+                    self._challenging_current_main_this_episode = True
+                return picked
+            if self.league_role == LeagueRole.LEAGUE_EXPLOITER:
+                return sample_for_league_exploiter(self.league_manager, self._league_wins_losses())
+            # MAIN (the default/expected role when league mode is on) -- and any other/unset
+            # role defensively falls back to Main's own whole-league sampling rather than crashing.
+            return sample_for_main(self.league_manager, self._league_wins_losses())
+
+        def _league_wins_losses(self):
+            """(wins, losses) dict shape rl_league.pfsp_sample expects, built from this process's
+            own two parallel dicts -- kept as two dicts rather than one dict-of-tuples so
+            recording a win/loss (step_wait, below) is a single dict increment, not a
+            read-tuple/rebuild-tuple/write-back round trip."""
+            return {
+                cid: (self._league_wins.get(cid, 0), self._league_losses.get(cid, 0))
+                for cid in set(self._league_wins) | set(self._league_losses)
+            }
+
         def _load_opponent_model(self, path):
             if path not in self._opponent_model_cache:
                 from stable_baselines3 import PPO
                 self._opponent_model_cache[path] = PPO.load(path)
             return self._opponent_model_cache[path]
+
+        def _resolve_league_path(self, candidate_id):
+            """League mode only: candidate_id is HEURISTIC_ID or a league member id (from
+            _sample_league_opponent) -- resolves it to a real checkpoint path, or None for the
+            heuristic sentinel. Falls back to the heuristic (logged, not silently) if the id
+            can't be found -- should not happen given LeagueManager's own permanent, never-
+            evicted registrations, but a real filesystem race (see LeagueManager.all_members's
+            own doc comment) degrades safely here rather than crashing a long training run."""
+            if candidate_id == HEURISTIC_ID:
+                return None
+            for member in self.league_manager.all_members():
+                if member.id == candidate_id:
+                    return member.path
+            print(f"[league] WARNING: sampled id {candidate_id!r} not found in league registry, "
+                  f"falling back to heuristic this episode")
+            return None
 
         def _actions_to_flat(self, actions):
             """Shared [move_x, move_z, cast_q>0, cast_w>0, cast_r>0] flattening used for both
@@ -321,7 +426,11 @@ try:
         def _do_reset(self):
             self.lib.sim_init_team(self.team_size, self._c_hero_ids_a, self._c_hero_ids_b)
             self._tick = 0
-            if self.autocurriculum:
+            if self._use_league:
+                # Same "once per EPISODE, not per tick" reasoning as the plain autocurriculum
+                # branch below -- see that branch's own comment.
+                self._current_opponent_key = self._sample_league_opponent()
+            elif self.autocurriculum:
                 # Opponent is sampled once per EPISODE, not per tick -- "the next episode's
                 # opponent," NORTHSTAR §25.4's own wording -- so team B plays one coherent
                 # opponent for the whole match rather than flickering between policies tick to
@@ -347,16 +456,21 @@ try:
             # team_size individual ones.
             flat_a = self._actions_to_flat(self._actions)
 
-            opponent = self.opponent_pool[self._current_opponent_idx] if self.autocurriculum else "heuristic"
-            if opponent == "heuristic":
+            if self._use_league:
+                opponent = self._resolve_league_path(self._current_opponent_key)
+            else:
+                opponent = self.opponent_pool[self._current_opponent_idx] if self.autocurriculum else "heuristic"
+                opponent = None if opponent == "heuristic" else opponent
+            if opponent is None:
                 # Unchanged path -- byte-identical to pre-§25.4 behavior, including when
-                # autocurriculum is off entirely (opponent is always "heuristic" in that case).
+                # autocurriculum/league mode are both off entirely (opponent is always the
+                # heuristic in that case).
                 self.lib.sim_step_team(flat_a, self.team_size, self.dt_ms)
             else:
-                # §25.4 autocurriculum: sampled opponent is a past self-play checkpoint -- get
-                # team B's OWN perspective via sim_get_obs_team_any (my_team=1), run it through
-                # that checkpoint's policy, and drive team B with the real resulting actions
-                # instead of the fixed heuristic.
+                # §25.4/§25.4.1: sampled opponent is a past self-play checkpoint (either the
+                # plain autocurriculum pool or a league member) -- get team B's OWN perspective
+                # via sim_get_obs_team_any (my_team=1), run it through that checkpoint's policy,
+                # and drive team B with the real resulting actions instead of the fixed heuristic.
                 model = self._load_opponent_model(opponent)
                 obs_b = []
                 for i in range(self.team_size):
@@ -406,7 +520,20 @@ try:
                 # decided match (`done`, winner in {1, 2}) -- a truncated (timed-out) episode has
                 # no real winner and would just add noise to the win-rate estimate PFSP samples
                 # from.
-                if self.autocurriculum and done and winner in (1, 2):
+                if self._use_league and done and winner in (1, 2):
+                    won = winner == 1
+                    key = self._current_opponent_key
+                    if won:
+                        self._league_wins[key] = self._league_wins.get(key, 0) + 1
+                    else:
+                        self._league_losses[key] = self._league_losses.get(key, 0) + 1
+                    # Main Exploiter's own real struggle-tracking (rl_league.is_struggling_vs_main)
+                    # -- only fed by episodes that specifically challenged the CURRENT Main, not
+                    # ones spent climbing down through its history (see
+                    # rl_league.sample_for_main_exploiter's own doc comment).
+                    if self._challenging_current_main_this_episode:
+                        self._recent_vs_current_main.append(1 if won else 0)
+                elif self.autocurriculum and done and winner in (1, 2):
                     if winner == 1:
                         self.opponent_wins[self._current_opponent_idx] += 1
                     else:

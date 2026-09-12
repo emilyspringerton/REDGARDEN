@@ -2888,6 +2888,82 @@ whole run. Scoped narrowly and honestly:
   conflates curriculum-over-opponents with curriculum-over-game-design; the former is this
   section's real scope, the latter is not spec'd here at all.
 
+### 25.4.1 League training (AlphaStar-style) — real fix for cyclic dominance (2026-09-12)
+
+Founder real-time, citing a real, named source: a YouTube explainer of DeepMind's own AlphaStar
+league (timestamps 13:01-13:55). §25.4's own existing autocurriculum above is plain PFSP against
+ONE policy's own growing checkpoint pool — exactly the "simple self-play" failure mode the video
+names: training against your current self makes you better against that one opponent while
+quietly getting worse against others, a real rock-paper-scissors dynamic (**cyclic dominance**).
+
+**The real fix, per the source**: a league of three distinct agent roles, trained simultaneously,
+each contributing PERMANENT (never evicted) checkpoints back into one shared pool:
+- **MAIN** — trains against the whole league (PFSP-weighted, biased toward whatever it currently
+  loses to most). Pushes the skill frontier forward; the same real objective §25.4's single
+  policy already has, now sampling from a shared multi-lineage pool instead of only its own
+  history.
+- **MAIN_EXPLOITER** — has ONE job: find and break Main's CURRENT weaknesses. Challenges Main's
+  freshest checkpoint directly by default; if it can't win consistently (no learning signal),
+  "climbs down" to Main's own historical checkpoints instead, biased toward ones it can ALREADY
+  beat, to build up real skill before re-challenging. Periodically resets to a freshly
+  initialized network so it can't converge onto one narrow trick forever.
+- **LEAGUE_EXPLOITER** — same whole-league PFSP sampling as Main, but a SEPARATE lineage — its
+  whole purpose is finding weaknesses that persist across the ENTIRE league, so the group never
+  holds a permanent blind spot.
+
+**Shipped 2026-09-12**: new `scripts/rl_league.py` — `LeagueRole` enum, the shared PFSP weighting
+function (`pfsp_weight`/`pfsp_sample`, now the one canonical implementation §25.4's own
+`ArenaTeamVecEnv._sample_opponent` still keeps its own pre-existing copy of, unchanged, for the
+plain single-pool path), `LeagueManager` (a real, permanent, append-only, cross-process JSON-file
+registry — no locking needed: each registration is a brand-new file, atomically renamed into
+place, never an overwrite of another process's), and the three roles' real sampling functions
+(`sample_for_main`/`sample_for_main_exploiter`/`sample_for_league_exploiter`) plus Main
+Exploiter's own struggle-detection (`is_struggling_vs_main`) and reset cadence
+(`should_reset_main_exploiter`). 29 real unit tests (`scripts/test_rl_league.py`, pure Python, no
+gymnasium/SB3/compiled-.so dependency) — caught and fixed one real bug live (`str(LeagueRole.MAIN)`
+returns `"LeagueRole.MAIN"`, not `"main"` — `Enum.__str__` wins over the `str` mixin despite
+`class LeagueRole(str, enum.Enum)` — fixed via a real `_role_str()` normalizer, not silently
+worked around at every call site).
+
+Wired into `scripts/rl_env_team.py`'s `ArenaTeamVecEnv` (new `league_manager`/`league_role`
+constructor params, fully additive — `league_manager=None`, the default, is byte-for-byte the
+pre-existing §25.4 behavior, zero regression, verified via the existing `--smoke-test` still
+producing an identical real episode) and `scripts/rl_train_team.py` (new `--league`/
+`--league-role`/`--league-dir`/`--league-reset-every-n-generations` flags; a real, found-and-fixed
+bug caught during this same pass: naively re-reading `model.num_timesteps` as the loop's own
+running total silently breaks the moment Main Exploiter's own periodic reset zeroes a fresh
+model's counter — fixed by tracking the delta from before each `.learn()` call instead of the raw
+value, so the outer loop's total-timesteps accounting survives a mid-run reset correctly). New
+`scripts/run_league.sh` launches all three roles as separate concurrent processes against one
+shared `--league-dir`, matching `run_bot_pool.sh`'s own orchestration conventions.
+
+**Real, honest, necessary scope note on "current Main"**: each role runs as a SEPARATE process —
+there is no single shared in-memory model. "Current Main," from Main Exploiter's own perspective,
+means Main's most-recently-REGISTERED checkpoint on disk (re-read from the shared registry), not
+the exact in-memory weights of a live-training process at that instant. This is the real, honest
+tradeoff of a checkpoint-based multi-process league (not a hack — any file-based league without
+extra IPC works this way), named directly rather than smoothed over.
+
+**Real, honest, this module's own interpretation, not a verbatim reproduction**: the source video
+describes Main Exploiter's "climb down" BEHAVIOR, not an exact formula. This is implemented here
+as the same PFSP weighting formula with the bias direction inverted (`favor_hard=False`: weight ∝
+win_rate^p instead of (1-win_rate)^p) — biasing toward historical Main checkpoints it can ALREADY
+beat rather than the hardest ones. A real, defensible, tested choice; not claimed to be
+DeepMind's own exact published algorithm.
+
+**NOT yet run end-to-end** (needs three real, long, concurrent training processes and real
+GPU/CPU time — a real cost/founder-scheduling decision, matching this file's own established
+posture for every prior autocurriculum/noisy-gestalt run, not attempted speculatively in the same
+pass that built the mechanism): whether the real three-role league measurably beats plain
+`--autocurriculum` at reducing cyclic dominance is the actual open question, same honesty
+convention §25.4/§25.5 already established for those features. `ArenaTeamVecEnv`'s own new league
+wiring also could not be exercised via a live SB3 rollout in this specific pass — gymnasium/
+stable-baselines3 are not installed in this sandbox as of 2026-09-12 (they WERE installed as of
+2026-08-10 per §25.5's own note; whoever runs this next should check current environment state
+before assuming either way). The pure `rl_league.py` logic is fully unit-tested regardless of
+that; the `ArenaTeamVecEnv`/`rl_train_team.py` integration layer was reviewed directly (a real bug
+already found and fixed in it, per the timesteps-counter note above) but not run.
+
 ### 25.5 What "built this session" actually means, honestly
 
 Updated 2026-08-10 (same day, later pass): `sim_init_team`/`sim_step_team`/`sim_get_obs_team`

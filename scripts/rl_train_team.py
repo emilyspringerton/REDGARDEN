@@ -40,6 +40,26 @@ timestep budget, not a regression in the mechanism. Whoever runs this next: chec
 and REDGARDEN/CHANGELOG.md for the current run count before assuming this note is still accurate.
 Role discovery and synergy decay (§25.2.3) remain spec-only; this closes two of the three
 remaining pieces, not all of them.
+
+--league (§25.4.1, rl_league.py, founder real-time citing a real AlphaStar league-training
+video): a real, additive extension of --autocurriculum addressing the "simple self-play produces
+cyclic dominance" failure mode the video names -- one policy training only against its own past
+selves can get better against one opponent while quietly getting worse against others, a real
+rock-paper-scissors dynamic. --league runs ONE of three roles per process invocation
+(--league-role main|main_exploiter|league_exploiter) against a shared, permanent, cross-process
+--league-dir registry (rl_league.LeagueManager) -- running the full league means launching all
+three roles as separate concurrent processes against the same --league-dir; see
+scripts/run_league.sh for the real orchestration. MAIN_EXPLOITER additionally resets to a freshly
+initialized network every --league-reset-every-n-generations checkpoint-save cycles (0 disables
+resetting). See rl_league.py's own module doc comment for the full three-role design and the real,
+named scope note on what "current Main" means across separate processes (the freshest registered
+checkpoint, not a live in-memory model). NOT yet run end-to-end (needs three real, long, concurrent
+training processes and real GPU/CPU time -- a real cost/founder-scheduling decision, not attempted
+speculatively in the same pass that built the mechanism): rl_league.py's own pure logic is unit-
+tested (scripts/test_rl_league.py), and this script's own wiring was reviewed directly, but "does
+running the real three-role league measurably beat plain --autocurriculum" is exactly the kind of
+open question this file's own history above already treats honestly for every prior feature
+(noisy-gestalt, autocurriculum itself) -- not resolved here, named as the real remaining step.
 """
 
 import argparse
@@ -78,6 +98,26 @@ def parse_args():
                         "the heuristic plus past self-play checkpoints, biased (PFSP) toward "
                         "whichever the current policy is losing to most, instead of always "
                         "the fixed heuristic. Pool grows as this run's own checkpoints save.")
+    p.add_argument("--league", action="store_true",
+                   default=os.environ.get("RL_LEAGUE", "0") == "1",
+                   help="NORTHSTAR §25.4.1: AlphaStar-style league training -- run ONE of "
+                        "--league-role's three roles against a shared, permanent, cross-process "
+                        "--league-dir registry instead of --autocurriculum's own small, "
+                        "evicting, single-lineage pool. Overrides --autocurriculum when both "
+                        "are set (league mode is the richer superset).")
+    p.add_argument("--league-role", choices=["main", "main_exploiter", "league_exploiter"],
+                   default=os.environ.get("RL_LEAGUE_ROLE", "main"),
+                   help="which of the three real league roles THIS process trains -- run all "
+                        "three as separate concurrent processes against the same --league-dir "
+                        "for the actual league (see scripts/run_league.sh)")
+    p.add_argument("--league-dir", default=os.environ.get("RL_LEAGUE_DIR", "rl_league"),
+                   help="shared, permanent, cross-process checkpoint registry directory -- "
+                        "every role's process must point at the SAME directory")
+    p.add_argument("--league-reset-every-n-generations", type=int,
+                   default=int(os.environ.get("RL_LEAGUE_RESET_EVERY", 5)),
+                   help="MAIN_EXPLOITER only: resets to a freshly initialized network every N "
+                        "checkpoint-save cycles (one generation = one --save-freq chunk). "
+                        "<= 0 disables resetting entirely. Ignored for main/league_exploiter.")
     p.add_argument("--skip-export", action="store_true",
                    help="skip converting the trained policy to the embedded-C header format -- "
                         "note this header is NOT yet wired into any live consumer for team-mode "
@@ -93,14 +133,15 @@ def parse_args():
 
 
 def make_env(lib_path, team_size, noisy_gestalt=False, gestalt_phase_ticks=50_000,
-             autocurriculum=False):
+             autocurriculum=False, league_manager=None, league_role=None):
     def _init():
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from rl_env_team import ArenaTeamVecEnv
         return ArenaTeamVecEnv(lib_path=lib_path, team_size=team_size,
                                 noisy_gestalt=noisy_gestalt,
                                 gestalt_phase_ticks=gestalt_phase_ticks,
-                                autocurriculum=autocurriculum)
+                                autocurriculum=autocurriculum,
+                                league_manager=league_manager, league_role=league_role)
     return _init
 
 
@@ -109,8 +150,21 @@ def main():
 
     from stable_baselines3 import PPO
 
+    league_manager = None
+    if args.league:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from rl_league import LeagueManager
+        league_manager = LeagueManager(args.league_dir)
+        print(f"[league] role={args.league_role} shared registry={args.league_dir} "
+              f"(NORTHSTAR §25.4.1) -- run the other two roles as separate concurrent "
+              f"processes against this SAME --league-dir for the real league; see "
+              f"scripts/run_league.sh")
+
     vec_env = make_env(args.lib_path, args.team_size, args.noisy_gestalt,
-                        args.gestalt_phase_ticks, args.autocurriculum)()  # ArenaTeamVecEnv IS the
+                        args.gestalt_phase_ticks, args.autocurriculum,
+                        league_manager=league_manager,
+                        league_role=args.league_role if args.league else None)()
+                                                           # ArenaTeamVecEnv IS the
                                                            # VecEnv -- no SubprocVecEnv/DummyVecEnv
                                                            # wrapper, see this file's own module
                                                            # doc comment
@@ -118,15 +172,23 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     policy_kwargs = dict(net_arch=args.net_arch)
-    model = PPO(
-        "MlpPolicy",
-        vec_env,
-        learning_rate=args.learning_rate,
-        n_steps=args.n_steps,
-        batch_size=args.batch_size,
-        policy_kwargs=policy_kwargs,
-        verbose=1,
-    )
+
+    def _fresh_model():
+        """Builds a brand-new PPO instance with freshly initialized weights, same hyperparameters
+        -- MAIN_EXPLOITER's own real periodic reset (rl_league.should_reset_main_exploiter, video
+        13:55) needs to actually discard learned weights, not just continue training the same
+        network under a new name."""
+        return PPO(
+            "MlpPolicy",
+            vec_env,
+            learning_rate=args.learning_rate,
+            n_steps=args.n_steps,
+            batch_size=args.batch_size,
+            policy_kwargs=policy_kwargs,
+            verbose=1,
+        )
+
+    model = _fresh_model()
 
     print(f"Training team PPO: team_size={args.team_size} total_timesteps={args.total_timesteps} "
           f"net_arch={args.net_arch}")
@@ -138,35 +200,65 @@ def main():
               f"{args.gestalt_phase_ticks} env ticks (NORTHSTAR §25.2.2).")
     else:
         print("Noisy-gestalt disabled (pass --noisy-gestalt to enable, NORTHSTAR §25.2.2).")
-    if args.autocurriculum:
+    if args.league:
+        print(f"League mode ENABLED: role={args.league_role}, shared registry={args.league_dir} "
+              f"(NORTHSTAR §25.4.1, supersedes --autocurriculum's own single-lineage pool). "
+              + (f"Resets to a fresh network every {args.league_reset_every_n_generations} "
+                 f"generations." if args.league_role == "main_exploiter"
+                 and args.league_reset_every_n_generations > 0 else
+                 "Reset cadence not applicable to this role."
+                 if args.league_role != "main_exploiter" else "Resetting disabled (--league-reset-every-n-generations <= 0)."))
+    elif args.autocurriculum:
         print("Autocurriculum ENABLED: team-B opponent sampled per episode (PFSP-biased) from "
               "the heuristic plus this run's own growing checkpoint pool (NORTHSTAR §25.4).")
     else:
         print("Autocurriculum disabled -- team B is always the fixed heuristic (pass "
               "--autocurriculum to enable, NORTHSTAR §25.4).")
     print("NOT yet trained here: role discovery / synergy decay (NORTHSTAR §25.2.3) -- this is "
-          "a shared-parameter baseline plus noisy-gestalt and/or autocurriculum when enabled, "
-          "not the full research thread those pieces build toward.")
+          "a shared-parameter baseline plus noisy-gestalt and/or autocurriculum/league when "
+          "enabled, not the full research thread those pieces build toward.")
 
     checkpoint_path_template = os.path.join(args.output_dir, "ppo_arena_team_step_{}")
     timesteps_done = 0
+    generation = 0
     while timesteps_done < args.total_timesteps:
         chunk = min(args.save_freq, args.total_timesteps - timesteps_done)
+        # `before` is read from whichever model object is CURRENT at the top of this iteration --
+        # after a Main Exploiter reset (below), that's a brand-new PPO whose own num_timesteps
+        # starts back at 0, so this correctly rebases the delta instead of computing a negative
+        # or stale value against the old (discarded) model's counter.
+        before = model.num_timesteps
         model.learn(total_timesteps=chunk, reset_num_timesteps=False)
         # Same real bug rl_train.py's own doc comment already documents fixing (crediting only
         # the requested chunk silently undercounts, since .learn() can only stop at a rollout
-        # boundary) -- reading the model's own authoritative counter here for the same reason.
-        timesteps_done = model.num_timesteps
+        # boundary) -- reading the model's own authoritative counter (as a DELTA from `before`,
+        # not the raw value -- a raw read breaks the moment a mid-run reset zeroes the model's
+        # own counter, undercounting real total progress and potentially looping far longer than
+        # --total-timesteps) for the same reason.
+        timesteps_done += model.num_timesteps - before
         ckpt_path = checkpoint_path_template.format(timesteps_done)
         model.save(ckpt_path)
-        print(f"Checkpoint saved: {ckpt_path}.zip ({timesteps_done}/{args.total_timesteps} timesteps)")
-        if args.autocurriculum:
+        print(f"Checkpoint saved: {ckpt_path}.zip ({timesteps_done}/{args.total_timesteps} timesteps) "
+              f"[generation {generation}]")
+        if args.league:
+            # §25.4.1: permanent, cross-process registration -- see LeagueManager.register's own
+            # doc comment for why this needs a real `generation` (Main Exploiter's own "current
+            # Main" / "climb down through history" logic both key off it).
+            vec_env.env_method("add_opponent_checkpoint", ckpt_path + ".zip", generation)
+            if args.league_role == "main_exploiter":
+                from rl_league import should_reset_main_exploiter
+                if should_reset_main_exploiter(generation, args.league_reset_every_n_generations):
+                    print(f"[league] Main Exploiter generation {generation}: resetting to a "
+                          f"freshly initialized network (video 13:55).")
+                    model = _fresh_model()
+        elif args.autocurriculum:
             # Feeds this run's own growing checkpoint into the opponent pool -- NORTHSTAR §25.4's
             # "sample the next episode's opponent... plus the heuristic AI" self-play requirement.
             # env_method calls add_opponent_checkpoint() once on the shared env (see
             # ArenaTeamVecEnv.env_method's own doc comment for why "once, not team_size times" is
             # correct here).
             vec_env.env_method("add_opponent_checkpoint", ckpt_path + ".zip")
+        generation += 1
 
     final_path = os.path.join(args.output_dir, "ppo_arena_team_final")
     model.save(final_path)
