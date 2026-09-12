@@ -62,7 +62,7 @@ the catalog's generic-tier items.
 
 ### Item stats
 
-The full 33-item catalog (`ARENA_ITEMS`, `packages/simulation/arena_game.c`, `ARENA_ITEM_COUNT`)
+The full 43-item catalog (`ARENA_ITEMS`, `packages/simulation/arena_game.c`, `ARENA_ITEM_COUNT`)
 — every stat bonus applies the instant you buy, no equip delay. Weapon carries 12 named items
 from `docs/HEROES_VS0.md`'s own "Season 3 LoL" starting roster plus 2 "weird" items with unusual
 stat shapes pulled from real FFXI end-game weapon reputations (Kraken Club: huge AD, zero
@@ -83,41 +83,76 @@ rubber-band comeback mechanic in the same spirit as §25.3's synergy decay below
 first pass at page-4-only pricing, with other items flagged for a later balance iteration, not
 touched in this pass.
 
-| Item | Slot | Cost | AD | HP | MP | Armor | Move Speed | CDR% | True Dmg | Lifesteal% |
-|---|---|---|---|---|---|---|---|---|---|---|
-| Seedling Charm | Weapon | 300 | +8 | +40 | — | — | — | — | — | — |
-| Bramble Fang | Weapon | 1000 | +35 | — | — | — | — | — | — | — |
-| Thornrender | Weapon | 950 | +28 | +10 | — | — | — | — | — | — |
-| Bloomheart Core | Weapon | 1100 | +45 | — | — | — | — | — | — | — |
-| Wanecall Grimoire | Weapon | 950 | +25 | — | +60 | — | — | — | — | — |
-| Ironbark Plate | Weapon | 900 | +10 | +150 | — | +20 | — | — | — | — |
-| Willowveil | Weapon | 850 | — | +120 | — | +25 | — | — | — | — |
-| Vampiric Bloom | Weapon | 1000 | +32 | +30 | — | — | — | — | — | — |
-| Splinterfang | Weapon | 900 | +30 | — | — | — | — | — | — | — |
-| Hollow Needle | Weapon | 900 | +30 | — | +40 | — | — | — | — | — |
-| Rootrunner Treads | Weapon | 500 | — | +10 | — | — | +0.8 | — | — | — |
-| Gardener's Ward | Weapon | 800 | — | +100 | — | +15 | — | — | — | — |
-| Kraken Club *(weird)* | Weapon | 1200 | +60 | — | — | — | — | — | — | — |
-| Ridill *(weird)* | Weapon | 1100 | +20 | +20 | — | +20 | — | — | — | — |
-| Optical Hat | Head | 400 | — | +60 | — | — | — | — | — | — |
-| Haubergeon | Body | 450 | — | — | — | +18 | — | — | — | — |
-| Battle Gloves | Hands | 400 | +12 | — | — | — | — | — | — | — |
-| Iron Ram Trousers | Legs | 400 | — | — | — | +18 | — | — | — | — |
-| Creek F. Boots | Feet | 400 | — | — | — | — | +0.6 | — | — | — |
-| Astral Ring | Ring | 350 | — | — | +50 | — | — | — | — | — |
-| Justice Badge | Neck | 400 | — | — | — | +14 | — | — | — | — |
-| Forager's Mantle | Back | 350 | +8 | — | — | — | +0.4 | — | — | — |
-| Warwolf Belt | Waist | 400 | — | +80 | — | — | — | — | — | — |
-| Peace Earring | Trinket | 350 | — | +30 | +40 | — | — | — | — | — |
-| Blink Dagger *(weird)* | Trinket | 1400 | +6 | +6 | — | — | — | — | — | — |
-| Donkey *(weird)* | Back | 3200 | — | — | — | — | — | — | — | — |
-| Haste Trinket | Trinket | 900 | — | — | — | — | — | 6% | — | — |
-| Gae Bolg *(weird)* | Weapon | 3000 | — | — | — | — | — | — | 18 | — |
-| Masamune *(weird)* | Weapon | 3300 | +15 | — | — | — | — | — | — | 15% |
-| Muramasa *(weird)* | Weapon | 3450 | +70 | — | — | — | — | — | — | — |
-| Balance Ring *(weird)* | Ring | 2700 | — | — | — | *dynamic* | — | — | — | — |
-| Empress Hairpin | Head | 1350 | — | — | +100 | — | — | 4% | — | — |
-| Ninja Tekko | Hands | 1500 | +20 | — | — | — | +1.0 | — | — | — |
+**Kite String, added 2026-08-26** (founder: *"add an item that increases auto attack range by 4%
+3333 flow 'Kite String' trinket"*) — no flat stats at all, same "this *is* the item, not a bonus
+on top of one" shape Haste Trinket already established: +4% auto-attack range
+(`bonus_attack_range_pct`), the catalog's first range-boosting stat.
+
+**Luck of the Draw, added 2026-09-03** (founder, cruise-queue: *"we should have a weapon that is
+on like page 5 for 2.2k flow a trinket called 'luck of the draw' that gives some mana regen
+during combat"*) — same "this is the item" shape as Kite String: a flat +1 mp/sec regen while in
+combat (`bonus_mp_regen_combat`), a real, modest improvement, not a build-defining spike.
+
+**8 more, added 2026-09-11 — a real GFD-item-database-inspired pass** (founder: *"iterate on
+REDGARDEN add some more items look into the GFD item database for inspiration bring in AD not
+just AP"*): real source, not invented — `GoblinFoxDragon/data/items.json`, a genuine FFXI-styled
+155-item catalog with a real Attack/STR/DEX (physical, "AD") vs. Magic Attack Bonus/INT/MND
+(magic, "AP") split. This engine has no ability-power-scaling mechanic at all (every hero's Q/W/R
+deals its own flat, hardcoded damage) — confirmed with the founder before writing any code — so
+"AP" items translate onto the existing mana/CDR stats as the closest real "caster" analog, not a
+new damage stat; real ability-power scaling across all 26 hero kits is separate, larger,
+not-yet-attempted follow-on work. Five of the eight close a real gap found by directly counting
+the catalog: Body, Legs, Feet, Neck, and Waist each had exactly **one** item before this pass —
+zero real build choice in 5 of 11 slots. The other three are new flagship Weapon items, including
+**Excalibur** — by a wide margin GFD's own single strongest item, now this catalog's new most
+powerful (and most expensive) item. This pass is what pushes the shop into a genuine 5th page for
+the first time (43 items ÷ 9/page).
+
+| Item | Slot | Cost | AD | HP | MP | Armor | Move Speed | CDR% | True Dmg | Lifesteal% | Atk Range% | MP Regen (Combat) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Seedling Charm | Weapon | 300 | +8 | +40 | — | — | — | — | — | — | — | — |
+| Bramble Fang | Weapon | 1000 | +35 | — | — | — | — | — | — | — | — | — |
+| Thornrender | Weapon | 950 | +28 | +10 | — | — | — | — | — | — | — | — |
+| Bloomheart Core | Weapon | 1100 | +45 | — | — | — | — | — | — | — | — | — |
+| Wanecall Grimoire | Weapon | 950 | +25 | — | +60 | — | — | — | — | — | — | — |
+| Ironbark Plate | Weapon | 900 | +10 | +150 | — | +20 | — | — | — | — | — | — |
+| Willowveil | Weapon | 850 | — | +120 | — | +25 | — | — | — | — | — | — |
+| Vampiric Bloom | Weapon | 1000 | +32 | +30 | — | — | — | — | — | — | — | — |
+| Splinterfang | Weapon | 900 | +30 | — | — | — | — | — | — | — | — | — |
+| Hollow Needle | Weapon | 900 | +30 | — | +40 | — | — | — | — | — | — | — |
+| Rootrunner Treads | Weapon | 500 | — | +10 | — | — | +0.8 | — | — | — | — | — |
+| Gardener's Ward | Weapon | 800 | — | +100 | — | +15 | — | — | — | — | — | — |
+| Kraken Club *(weird)* | Weapon | 1200 | +60 | — | — | — | — | — | — | — | — | — |
+| Ridill *(weird)* | Weapon | 1100 | +20 | +20 | — | +20 | — | — | — | — | — | — |
+| Optical Hat | Head | 400 | — | +60 | — | — | — | — | — | — | — | — |
+| Haubergeon | Body | 450 | — | — | — | +18 | — | — | — | — | — | — |
+| Battle Gloves | Hands | 400 | +12 | — | — | — | — | — | — | — | — | — |
+| Iron Ram Trousers | Legs | 400 | — | — | — | +18 | — | — | — | — | — | — |
+| Creek F. Boots | Feet | 400 | — | — | — | — | +0.6 | — | — | — | — | — |
+| Astral Ring | Ring | 350 | — | — | +50 | — | — | — | — | — | — | — |
+| Justice Badge | Neck | 400 | — | — | — | +14 | — | — | — | — | — | — |
+| Forager's Mantle | Back | 350 | +8 | — | — | — | +0.4 | — | — | — | — | — |
+| Warwolf Belt | Waist | 400 | — | +80 | — | — | — | — | — | — | — | — |
+| Peace Earring | Trinket | 350 | — | +30 | +40 | — | — | — | — | — | — | — |
+| Blink Dagger *(weird)* | Trinket | 1400 | +6 | +6 | — | — | — | — | — | — | — | — |
+| Donkey *(weird)* | Back | 3200 | — | — | — | — | — | — | — | — | — | — |
+| Haste Trinket | Trinket | 900 | — | — | — | — | — | 6% | — | — | — | — |
+| Gae Bolg *(weird)* | Weapon | 3000 | — | — | — | — | — | — | 18 | — | — | — |
+| Masamune *(weird)* | Weapon | 3300 | +15 | — | — | — | — | — | — | 15% | — | — |
+| Muramasa *(weird)* | Weapon | 3450 | +70 | — | — | — | — | — | — | — | — | — |
+| Balance Ring *(weird)* | Ring | 2700 | — | — | — | *dynamic* | — | — | — | — | — | — |
+| Empress Hairpin | Head | 1350 | — | — | +100 | — | — | 4% | — | — | — | — |
+| Ninja Tekko | Hands | 1500 | +20 | — | — | — | +1.0 | — | — | — | — | — |
+| Kite String | Trinket | 3333 | — | — | — | — | — | — | — | — | 4% | — |
+| Luck of the Draw | Trinket | 2200 | — | — | — | — | — | — | — | — | — | +1/s |
+| Wizard's Coat | Body | 1400 | — | — | +80 | +10 | — | 3% | — | — | — | — |
+| Chain Leggings | Legs | 1100 | — | +70 | — | +14 | — | — | — | — | — | — |
+| Boots of Winter | Feet | 1200 | — | — | +60 | — | +0.5 | — | — | — | — | — |
+| Mage's Earring | Neck | 900 | — | — | +70 | — | — | — | — | — | — | — |
+| Venerer's Belt | Waist | 1300 | +12 | — | — | — | — | — | — | — | 2% | — |
+| Mikazuki *(weird)* | Weapon | 2400 | +34 | — | — | — | — | 5% | — | — | — | — |
+| Dojigiri *(weird)* | Weapon | 2800 | +58 | — | — | — | +1.0 | — | — | — | — | — |
+| Excalibur *(weird)* | Weapon | 4200 | +50 | +120 | — | +20 | — | — | — | — | — | — |
 
 ### Item mechanics beyond the stat columns
 
@@ -161,6 +196,25 @@ columns can't express — surfaced here explicitly rather than left implicit in 
   Hat.
 - **Ninja Tekko** — plain flat stats (+20 AD, +1.0 move speed), no hidden mechanic — an
   assassin-shaped hybrid alternative to Battle Gloves' pure-AD Hands item.
+- **Kite String** — +4% auto-attack range (`bonus_attack_range_pct`), specifically basic
+  auto-attacks, not ability ranges. No flat stats at all — same "this *is* the item" shape as
+  Haste Trinket, just for range instead of cooldown.
+- **Luck of the Draw** — +1 flat mp/sec regen, but *only while in combat*
+  (`bonus_mp_regen_combat`, added on top of the base in-combat regen rate). No flat stats
+  otherwise — a real, modest ability-spam sustain pickup, not a build-defining spike.
+- **Wizard's Coat / Chain Leggings / Boots of Winter / Mage's Earring / Venerer's Belt** — the
+  GFD-inspired pass's five gap-fillers: a genuine second option in the Body/Legs/Feet/Neck/Waist
+  slots (each previously had exactly one item). Every one is a real stat-shape *tradeoff* against
+  that slot's original item, not a strict upgrade — e.g. Wizard's Coat trades Haubergeon's flat
+  armor for mana + CDR%, Chain Leggings trades Iron Ram Trousers' armor for HP, Venerer's Belt
+  trades Warwolf Belt's HP for AD + a small auto-attack-range bonus.
+- **Mikazuki / Dojigiri / Excalibur** *(weird)* — three new flagship Weapon items, named after
+  real legendary swords (two real-world Japanese National Treasures plus Excalibur itself), stat
+  *shape* picked to reflect each blade's own real reputation: Mikazuki is a fast, cooldown-heavy
+  skirmisher's weapon; Dojigiri pairs the GFD database's single highest raw-attack stat with real
+  mobility, a "mobile duelist" glass cannon distinct from Muramasa's immobile one; Excalibur is a
+  well-rounded AD/armor/HP blend at the catalog's new highest price — the new top of the power
+  curve, not another one-note glass cannon.
 
 ### Hero passives
 
