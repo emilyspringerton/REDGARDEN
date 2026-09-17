@@ -829,27 +829,15 @@ static void server_handle_packet(struct sockaddr_in *sender, char *buffer, int s
            exactly one slot. An unauthorized unit_owner is silently dropped, same "malformed/
            out-of-bounds input is just ignored" convention every other handler here already uses. */
         if (arena_owner_controls(client_id, cmd->unit_owner)) {
-            /* Real, server-side diagnostic (2026-08-26, founder: "AT ONE POINT I GOT STUCK
-               SIDEWAYS AND HE WAS LIKE TRYING TO ROTATE TO RUN WHERE I WANTED BUT KIND
-               ACOULDNT IT WAS WEIRD" -> "CAN WE ADD LOGS TO HELP DEBUG IT?" -- an
-               intermittent, "after a while of playing" movement bug with no hard repro
-               yet). Logs every real move command for a real hero (not a clone/creep) along
-               with every real state that could silently block update_hero_motion from
-               advancing (rooted_ms/stunned_ms/attack_windup_ms_remaining/casting_slot) --
-               if any of those is stuck nonzero across many consecutive move commands, that's
-               the real, readable-from-var/logs/matchmaker-bots.log signature of a "can't
-               move/rotate" bug. Temporary, meant to come back out once this is root-caused,
-               same discipline the earlier [abraham-debug] traces this session already used
-               and later removed. */
-            if (cmd->unit_owner >= 0 && cmd->unit_owner < ARENA_MAX_HEROES) {
-                ArenaHero *mv_dbg = &arena_state.heroes[cmd->unit_owner];
-                fprintf(stderr, "[move-debug] owner=%d target=(%.2f,%.2f) cur=(%.2f,%.2f) "
-                                "facing=%.3f rooted_ms=%d stunned_ms=%d attack_windup_ms=%d "
-                                "casting_slot=%d moving=%d\n",
-                        cmd->unit_owner, cmd->target_x, cmd->target_z, mv_dbg->x, mv_dbg->z,
-                        mv_dbg->facing_rad, mv_dbg->rooted_ms, mv_dbg->stunned_ms,
-                        mv_dbg->attack_windup_ms_remaining, mv_dbg->casting_slot, mv_dbg->moving);
-            }
+            /* [move-debug] removed (2026-09-17, founder real-time: "make the matchmaker bots
+               file less chatty... its basically idle i think it shouldnt really be doing
+               anything" -- the real cause: this per-move-command trace, added 2026-08-26 for a
+               specific "stuck, can't rotate" bug investigation and explicitly marked temporary,
+               was still firing on every real move command for every hero -- including every bot
+               in the self-sustaining R&D pool's own continuous bot-vs-bot matches -- for three
+               weeks, growing var/logs/matchmaker-bots.log to 15GB and filling the disk to 99%.
+               Pulled back out, same discipline this comment's own text already named ("same
+               discipline the earlier [abraham-debug] traces... later removed"). */
             arena_set_move_target(cmd->unit_owner, cmd->target_x, cmd->target_z);
         }
     } else if (head->type == PACKET_ARENA_CAST) {
