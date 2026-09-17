@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-17
+
+- fix(arena_server): removed [move-debug] fprintf trace (per-move-command, added 2026-08-26 for a since-resolved bug, explicitly marked temporary) that grew var/logs/matchmaker-bots.log to 15GB over 3 weeks of continuous bot-pool matches -- contributed to the box hitting 99% disk usage and corrupting an unrelated IDUNA deploy (sess-20260905-0720-ec33e7c5)
+
+
 ## 2026-09-12
 
 - AlphaStar-style league training (NORTHSTAR §25.4.1): new scripts/rl_league.py (LeagueRole, PFSP weighting, permanent cross-process LeagueManager registry, Main/Main-Exploiter/League-Exploiter sampling logic incl. Main Exploiter's climb-down + periodic reset), wired into rl_env_team.py's ArenaTeamVecEnv (fully additive, zero regression to the existing --autocurriculum path) and rl_train_team.py (new --league/--league-role/--league-dir/--league-reset-every-n-generations flags), plus scripts/run_league.sh to launch all three roles concurrently. 29 unit tests, caught and fixed 2 real bugs live (str(LeagueRole.MAIN) formatting; a training-loop timesteps counter that broke under a mid-run model reset). Addresses the founder-cited cyclic-dominance failure mode of plain self-play. Not yet run end-to-end (needs real multi-hour concurrent GPU/CPU time, a founder-scheduling decision). (sess-20260905-0720-ec33e7c5)
