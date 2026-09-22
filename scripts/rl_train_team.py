@@ -240,6 +240,11 @@ def main():
         model.save(ckpt_path)
         print(f"Checkpoint saved: {ckpt_path}.zip ({timesteps_done}/{args.total_timesteps} timesteps) "
               f"[generation {generation}]")
+        from checkpoint_git_sync import sync_checkpoint_async
+        sync_checkpoint_async(
+            ckpt_path + ".zip",
+            f"checkpoint: step {timesteps_done} (generation {generation})",
+        )
         if args.league:
             # §25.4.1: permanent, cross-process registration -- see LeagueManager.register's own
             # doc comment for why this needs a real `generation` (Main Exploiter's own "current
@@ -263,6 +268,8 @@ def main():
     final_path = os.path.join(args.output_dir, "ppo_arena_team_final")
     model.save(final_path)
     print(f"Final model saved: {final_path}.zip")
+    from checkpoint_git_sync import sync_checkpoint_async
+    sync_checkpoint_async(final_path + ".zip", "checkpoint: final model")
 
     # Evaluation: real team-match episodes against the same heuristic opponent, win rate = the
     # fraction of episodes where team A (winner==1) won.
