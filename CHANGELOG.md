@@ -5,6 +5,11 @@
 - feat(rl): git-lfs model-repository sync for RL checkpoints -- each `rl_team_checkpoints*/` dir
   becomes its own real git-lfs repo, committed on every save (periodic + final), on by default
   (`REDGARDEN_CHECKPOINT_GIT_DISABLED=1` opts out). No remote configured yet (`018f185`).
+- feat(rl): Colab driver (`scripts/colab_train_league.py`) + notebook
+  (`notebooks/redgarden_pfsp_league_colab.ipynb`) for the real 3-role AlphaStar-style PFSP league
+  (NORTHSTAR §25.4.1), Drive-backed so checkpoints/league registry/git-lfs history survive
+  session resets. Structurally verified; live PPO run blocked in this sandbox by a real,
+  pre-existing, unrelated stable-baselines3 import-chain segfault, documented not hidden (`6a4bcb6`).
 
 ## 2026-09-17
 
