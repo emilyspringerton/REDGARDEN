@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-22
+
+- feat(rl): git-lfs model-repository sync for RL checkpoints -- each `rl_team_checkpoints*/` dir
+  becomes its own real git-lfs repo, committed on every save (periodic + final), on by default
+  (`REDGARDEN_CHECKPOINT_GIT_DISABLED=1` opts out). No remote configured yet (`018f185`).
+
 ## 2026-09-17
 
 - fix(arena_server): removed [move-debug] fprintf trace (per-move-command, added 2026-08-26 for a since-resolved bug, explicitly marked temporary) that grew var/logs/matchmaker-bots.log to 15GB over 3 weeks of continuous bot-pool matches -- contributed to the box hitting 99% disk usage and corrupting an unrelated IDUNA deploy (sess-20260905-0720-ec33e7c5)
