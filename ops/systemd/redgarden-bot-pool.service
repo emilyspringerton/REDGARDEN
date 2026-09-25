@@ -48,7 +48,7 @@
 # repo's own git history and deliberately not done as part of this commit.
 
 [Unit]
-Description=REDGARDEN arena persistent bot pool (20 bots, fully self-sustaining -> bot-pool matchmaker :7778)
+Description=REDGARDEN arena persistent bot pool (19 bots, 1 human slot open -> bot-pool matchmaker :7778)
 After=network-online.target redgarden-matchmaker-bots.service
 Wants=redgarden-matchmaker-bots.service
 
@@ -57,7 +57,7 @@ Type=simple
 WorkingDirectory=/home/fatbaby/REDGARDEN
 Environment=REDGARDEN_TICKET_SECRET=test-secret-for-vs0-vs1-validation
 ExecStartPre=/bin/sleep 2
-ExecStart=/home/fatbaby/REDGARDEN/scripts/run_bot_pool.sh 20
+ExecStart=/home/fatbaby/REDGARDEN/scripts/run_bot_pool.sh 19
 Restart=on-failure
 RestartSec=5s
 StandardOutput=append:/home/fatbaby/REDGARDEN/var/logs/bot-pool.log
