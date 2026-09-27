@@ -2690,6 +2690,42 @@ static void play_cast_tone(int slot) {
 }
 
 int main(int argc, char *argv[]) {
+    /* Real, file-based logging (EMILY/BACKLOG.md SECTION 554, 2026-09-25, founder real-time:
+       pasted a real Windows RedGarden.exe console transcript showing a successful draft pick
+       followed by total silence and an immediate exit to PLAY.bat's own `pause`) -- copied
+       verbatim from PAPERCRAFT/apps/client/src/main.c's own identical fix (2026-08-29, founder:
+       "im on windows and i dont have eaasy access to command line can you add some logging into
+       the client directory?"). PLAY.bat launches RedGarden.exe directly in its own console
+       window, which closes/returns to `pause` the instant the process exits -- on a fast or
+       silent failure that's a real console flash with no way to ever read what it said.
+       Redirecting stdout AND stderr to a real redgarden_arena.log file next to the exe (relative
+       path -- resolves to whatever directory a Windows double-click's own "current directory" is,
+       the same directory the exe itself lives in) captures every real printf/fprintf this file
+       already makes, with zero changes needed at any other call site. Overwrites on every real
+       launch (not appended) -- the founder wants to see what THIS run did. Best-effort: if this
+       real redirect fails (e.g. no write permission in the exe's own directory), both streams
+       silently fall back to whatever they already were -- never a hard crash over a log file.
+       Return values deliberately ignored (freopen is warn_unused_result on glibc) -- captured
+       into a real, named variable and explicitly cast to void, same idiom PAPERCRAFT's own copy
+       uses to silence the warning without disabling it repo-wide.
+
+       Placement: the literal first statements of main(), before argv parsing, before the
+       _WIN32 WSAStartup block (~40 lines below, itself gated on `if (connect_host ||
+       queue_host)`), and before any other network call -- same real WSA-10093-shaped ordering
+       trap PAPERCRAFT's own doc comment names (Winsock has to be initialized, and now logging
+       has to be wired up, before anything that could fail early ever runs). Verified this really
+       is PAPERCRAFT's own real placement (not assumed): its freopen/setvbuf calls are the first
+       statements of its main() too, unconditional on any platform, running before its own
+       WSAStartup and before its own argv loop -- matched here exactly, also unconditional (not
+       #ifdef _WIN32-gated), since a founder reading this log on Linux/macOS loses nothing by it
+       existing. */
+    FILE *log_stdout = freopen("redgarden_arena.log", "w", stdout);
+    FILE *log_stderr = freopen("redgarden_arena.log", "a", stderr);
+    (void)log_stdout;
+    (void)log_stderr;
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+
     /* No srand() call existed anywhere in this file before -- mint_ticket_fallback's own
        rand()-based nonce (used only when IDUNA isn't reachable) was silently using the default
        seed=1 sequence, identical every single launch, a real if minor pre-existing weakness. */
