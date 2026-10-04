@@ -103,6 +103,9 @@ static int next_game_port = 7100;
  * very recently, likely-already-exited match server used is a real but small, accepted risk, not
  * a redesign of the single global sequential counter into a real free-list. */
 #define GAME_PORT_RANGE 200
+/* --game-port-range N (2026-10-04, K8S): a LoadBalancer only exposes a fixed port list, so the cycle
+ * must be boundable at launch; default stays 200 so every existing invocation is unchanged. */
+static int game_port_range = GAME_PORT_RANGE;
 static int first_game_port = 7100;
 static int lobby_size = 2;
 static int sock = -1;
@@ -207,7 +210,7 @@ static void try_match(void) {
         queue_count -= lobby_size;
 
         int port = next_game_port++;
-        if (next_game_port >= first_game_port + GAME_PORT_RANGE) next_game_port = first_game_port;
+        if (next_game_port >= first_game_port + game_port_range) next_game_port = first_game_port;
         unsigned int seed = (unsigned int)rand();
         if (!spawn_game_server(port, seed)) {
             printf("MATCHMAKER: failed to spawn game server on port %d\n", port);
@@ -241,6 +244,9 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[i], "--first-game-port") == 0 && i + 1 < argc) {
             first_game_port = atoi(argv[++i]);
             next_game_port = first_game_port;
+        } else if (strcmp(argv[i], "--game-port-range") == 0 && i + 1 < argc) {
+            game_port_range = atoi(argv[++i]);
+            if (game_port_range < 1) game_port_range = 1;
         } else if (strcmp(argv[i], "--lobby-size") == 0 && i + 1 < argc) {
             lobby_size = atoi(argv[++i]);
             if (lobby_size < 2) lobby_size = 2;
