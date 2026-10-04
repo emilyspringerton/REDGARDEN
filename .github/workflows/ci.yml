@@ -147,7 +147,7 @@ jobs:
           # secret for exactly this kind of validation, not a real production
           # credential -- matches what the live bot pool's matchmaker/
           # arena_server processes are run with.
-          printf '%s\r\n' "@echo off" "set REDGARDEN_TICKET_SECRET=test-secret-for-vs0-vs1-validation" "echo Connecting to the persistent bot pool at 198.58.107.85 ..." "RedGarden.exe --queue 198.58.107.85" "pause" > RedGarden_Client/PLAY.bat
+          printf '%s\r\n' "@echo off" "set REDGARDEN_TICKET_SECRET=test-secret-for-vs0-vs1-validation" "echo Connecting to the persistent bot pool at rnd.rg.okemily.com ..." "RedGarden.exe --queue rnd.rg.okemily.com" "pause" > RedGarden_Client/PLAY.bat
           zip -r "RedGarden_Client_${BUILD}.zip" RedGarden_Client
 
           mkdir -p RedGarden_Server
