@@ -2,6 +2,12 @@
 
 ## What this is
 
+**Production runs in Kubernetes**: GKE namespace `emily`, `svc/redgarden-rnd` and
+`svc/redgarden-stable` (two separate tracks, each with its own `*-udp` LoadBalancer over large
+UDP port ranges), images `emily/redgarden-rnd:<sha>` / `emily/redgarden-stable:<sha>` — see root
+`CLAUDE.md`'s "Kubernetes Operations" section to reach a live cluster instance instead of a
+local build.
+
 A deck-based real-time strategy game: Clash Royale's card-hand/mana-economy model over a living
 cellular-automata board (Neutral/Player/Enemy/Corrupted cells that spread and react on their own
 2-second tick, independent of direct player action). Prototype proving-ground for FIELDOFFICE/
