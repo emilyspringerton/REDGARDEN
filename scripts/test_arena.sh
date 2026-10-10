@@ -360,3 +360,11 @@ gcc -std=c99 -O2 -Wall -Wextra -I"${ROOT_DIR}/packages" \
 "${BUILD_DIR}/test_gpt2_infer"
 "${BUILD_DIR}/test_arena_training"
 "${BUILD_DIR}/test_mlp_infer"
+
+# IDUNA account module (packages/common/rg_account.h): real curl + loopback callback against a
+# stub IDUNA. Needs python3 and curl; skipped (not failed) where either is missing.
+if command -v python3 >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+  python3 "${ROOT_DIR}/tests/test_rg_account.py"
+else
+  echo "skip: tests/test_rg_account.py needs python3 and curl"
+fi

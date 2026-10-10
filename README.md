@@ -293,6 +293,15 @@ built yet. What's actually real, right now:
 - **Accounts**: connect-ticket auth (HMAC-SHA256, same scheme as sibling repo shankpit-460) — see
   `packages/common/hmac_sha256.h`. `apps/server` verifies tickets on connect, fails closed without
   `REDGARDEN_TICKET_SECRET`.
+- **Player identity (new 2026-10-10, partly verified)**: the human client can pick a name, keep a
+  saved guest account, link an email to save progress, or sign in with IDUNA through a WOTAN
+  browser page and a loopback callback, then mint its connect ticket from IDUNA
+  (`packages/common/rg_account.h`; `--account`). Verified: the account module end to end against
+  a stub IDUNA (`python3 tests/test_rg_account.py`), and IDUNA's/WOTAN's side with their own
+  tests. **Not verified:** the SDL client build (no SDL2 headers in the sandbox), Windows, and a
+  live run against production IDUNA — which also needs `REDGARDEN_TICKET_SECRET` added to IDUNA's
+  environment (not set today). Results, heroes played and profiles show on WOTAN's REDGARDEN tab
+  (`wotan.okemily.com/redgarden/`).
 - **Matchmaking**: `apps/matchmaker` — this simulation is one match per process by design, so
   matchmaking means pairing queued clients and spawning a dedicated `red_garden_server --port <N>`
   per match. **R&D vs. Stable deployment split (2026-08-10):** this checkout (`:7778`/`:7779`

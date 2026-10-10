@@ -35,6 +35,7 @@
 #include "../../../packages/common/protocol.h"
 #include "../../../packages/common/hmac_sha256.h"
 #include "../../../packages/common/http_client.h"
+#include "../../../packages/common/rg_account.h"
 #include "../../../packages/simulation/arena_game.h"
 #include "../../../packages/simulation/arena_ai_bridge.h"
 #include "../../../packages/simulation/arena_replay.h"
@@ -175,6 +176,15 @@ static struct sockaddr_in net_server_addr;
  * self-registration, self-minted dev fallback) -- neither of those carry a real DragonsNShit
  * identity, and self-registration would silently mint a throwaway one instead. */
 static const char *g_supplied_ticket_hex = NULL;
+
+/* IDUNA player identity (founder real-time, 2026-10-10: "update REDGARDEN for IDUNA OAUTH, same
+ * pattern as the deck tracker ... where it gives you a name and allows you to save progress /
+ * login with IDUNA"). See packages/common/rg_account.h: saved guest creds -> guest-login, else the
+ * WOTAN connect page in the browser (pick a name / sign in with IDUNA) bounces back to a loopback
+ * callback. Used by net_connect below when no --ticket, no agent secret and no dev
+ * REDGARDEN_TICKET_SECRET is present -- i.e. the normal "a human double-clicked the game" case. */
+static RgAccount g_rg_account;
+static int g_rg_force_account = 0; /* --account: use the IDUNA account flow even if REDGARDEN_TICKET_SECRET is set */
 
 static char iduna_host[128] = "127.0.0.1";
 static int iduna_port = 8080;
@@ -328,6 +338,15 @@ static int net_connect(const char *host, int port) {
     }
     if (!have_ticket && iduna_agent_configured) {
         have_ticket = get_real_wotan_ticket(ticket);
+    }
+    {
+        const char *dev_secret = getenv("REDGARDEN_TICKET_SECRET");
+        if (!have_ticket && (g_rg_force_account || !dev_secret || !dev_secret[0])) {
+            have_ticket = rg_account_ticket(&g_rg_account, ticket);
+            if (have_ticket) {
+                printf("REDGARDEN: connecting as %s (%s)\n", g_rg_account.name, g_rg_account.player_id);
+            }
+        }
     }
     if (!have_ticket) {
         const char *secret = getenv("REDGARDEN_TICKET_SECRET");
@@ -2755,6 +2774,11 @@ int main(int argc, char *argv[]) {
     int connect_port = 7200;
     const char *queue_host = NULL;
     int queue_port = 7778; /* apps/matchmaker's documented arena listen-port */
+    /* IDUNA account flow (see g_rg_account): API origin, connect page and saved-identity file.
+       Env fallbacks so a PLAY.bat can set them without editing the command line. */
+    const char *rg_iduna_url = getenv("REDGARDEN_IDUNA_URL");
+    const char *rg_connect_url = getenv("REDGARDEN_CONNECT_URL");
+    const char *rg_account_file = getenv("REDGARDEN_ACCOUNT_FILE");
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--observe") == 0 && i + 1 < argc) {
             if (!arena_replay_load(argv[i + 1], &replay)) {
@@ -2778,8 +2802,18 @@ int main(int argc, char *argv[]) {
             queue_port = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--ticket") == 0 && i + 1 < argc) {
             g_supplied_ticket_hex = argv[++i];
+        } else if (strcmp(argv[i], "--account") == 0) {
+            g_rg_force_account = 1;
+        } else if (strcmp(argv[i], "--iduna-url") == 0 && i + 1 < argc) {
+            rg_iduna_url = argv[++i];
+        } else if (strcmp(argv[i], "--connect-url") == 0 && i + 1 < argc) {
+            rg_connect_url = argv[++i];
+        } else if (strcmp(argv[i], "--account-file") == 0 && i + 1 < argc) {
+            rg_account_file = argv[++i];
         }
     }
+    rg_account_init(&g_rg_account, rg_iduna_url, rg_connect_url, rg_account_file);
+    rg_account_load(&g_rg_account);
 #ifdef _WIN32
     /* Sockets need WSAStartup before any socket() call on Windows -- only
        needed if this run actually uses the network (--connect/--queue),

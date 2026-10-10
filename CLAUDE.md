@@ -79,6 +79,29 @@ tickets on `PACKET_CONNECT`, fails closed without `REDGARDEN_TICKET_SECRET` set.
 self-mint tickets (mirrors shankpit-460's `emily-bot` pattern) — no real IDUNA account needed for
 headless QA.
 
+### Player identity via IDUNA (2026-10-10)
+
+`apps/arena` (the human client) gets a real name + saved progress + "sign in with IDUNA", same
+shape as DEADWEIGHT's guest accounts and the Hearthstone tracker's browser sign-in
+(`packages/common/rg_account.h`, tested by `tests/test_rg_account.py` against a stub IDUNA):
+
+1. saved `redgarden_account.txt` (player_id + guest_secret) -> `guest-login` on
+   `/api/v1/games/redgarden` -> player token;
+2. otherwise the client opens `https://wotan.okemily.com/redgarden/connect.html?port=&state=`; the
+   page registers a guest (name), links an email ("save progress"), or signs in with IDUNA SSO,
+   then bounces the browser to `http://127.0.0.1:<port>/cb` (loopback, one-shot nonce);
+3. `POST /api/v1/redgarden/self-ticket` with that token -> a 5-minute connect ticket for the
+   server's existing HMAC verification. No server-protocol change.
+
+Network calls shell out to `curl` (https; this repo has no TLS stack). Flags/env: `--iduna-url`
+(`REDGARDEN_IDUNA_URL`), `--connect-url`, `--account-file`, `--account` (use this flow even when
+`REDGARDEN_TICKET_SECRET` is set; with the secret set and no `--account` the client keeps the old
+self-minted dev ticket, which is what the packaged `PLAY.bat` does today).
+
+**Deploy prerequisite (not done):** IDUNA's `iduna-env` secret has no `REDGARDEN_TICKET_SECRET`, so
+`self-ticket` answers 503 until it is set to the same value `redgarden-env` gives the servers.
+`arena_server` also reports `hero_id` with each result now (WOTAN's per-hero profile).
+
 ## UI constraint (cross-cutting, see NORTHSTAR §2)
 
 All shop/menu surfaces (item shop, cooking, crafting) need high-APM affordances — both keybind

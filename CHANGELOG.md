@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-10
+
+- feat(accounts): IDUNA player identity for the human client -- name pick, saved progress and
+  "sign in with IDUNA" through a WOTAN connect page + loopback callback, then
+  `/api/v1/redgarden/self-ticket` (`packages/common/rg_account.h`, `--account`/`--iduna-url`;
+  `tests/test_rg_account.py` runs real curl + real loopback against a stub IDUNA). The SDL client
+  itself could not be compiled in this sandbox (no SDL2 headers): only the header + its test and the
+  arena_server change were built and run.
+- feat(stats): `arena_server` sends `hero_id` with each `game-result`; IDUNA keeps a per-player
+  match log and WOTAN's new REDGARDEN tab renders leaderboard, hero strength and profiles. Also
+  found: arena results were reported as game `redgarden-arena` while the leaderboard read only
+  `redgarden`, so none of them ever showed (IDUNA now reads both).
+
 ## 2026-09-22
 
 - feat(rl): git-lfs model-repository sync for RL checkpoints -- each `rl_team_checkpoints*/` dir

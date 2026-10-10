@@ -191,8 +191,11 @@ static void report_match_result(int winner) {
         int my_team = arena_state.heroes[owner].team;
         const char *result = ((my_team + 1) == winner) ? "win" : "loss";
         char body[256];
+        /* hero_id (2026-10-10): lets IDUNA keep a per-player hero/recent-match log for WOTAN's
+           REDGARDEN profile pages -- same value the hero-result report below already sends. */
         snprintf(body, sizeof(body),
-                 "{\"player_id\":\"%s\",\"game\":\"redgarden-arena\",\"result\":\"%s\"}", pid, result);
+                 "{\"player_id\":\"%s\",\"game\":\"redgarden-arena\",\"result\":\"%s\",\"hero_id\":%d}",
+                 pid, result, (int)arena_state.heroes[owner].hero_id);
         if (http_post_json(iduna_host, iduna_port, "/api/v1/redgarden/game-result", token,
                             body, resp, sizeof(resp), &status) != 0 || status != 200) {
             fprintf(stderr, "WOTAN: game-result report failed for client %d (status=%d)\n", owner, status);
