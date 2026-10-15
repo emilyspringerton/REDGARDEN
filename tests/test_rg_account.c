@@ -1,11 +1,12 @@
 /* Standalone driver for packages/common/rg_account.h: tests/test_rg_account.py runs it against a stub
-   IDUNA + a fake browser. Usage: test_rg_account <base_url> <account_file> <login_timeout_s> */
+   IDUNA + a fake browser. Usage: test_rg_account <base_url> <account_file> <login_timeout_s> [sdk] */
 #include "../packages/common/rg_account.h"
 int main(int argc, char **argv) {
     if (argc < 4) return 2;
     RgAccount a;
     rg_account_init(&a, argv[1], NULL, argv[2]);
     a.login_timeout_s = atoi(argv[3]);
+    if (argc > 4 && strcmp(argv[4], "sdk") == 0) a.use_sdk = 1; /* --login-iduna path (kanban #631) */
     rg_account_load(&a);
     unsigned char t[RG_TICKET_LEN];
     if (!rg_account_ticket(&a, t)) { printf("NOTICKET\n"); return 1; }

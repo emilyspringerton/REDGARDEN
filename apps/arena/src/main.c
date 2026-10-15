@@ -184,6 +184,7 @@ static const char *g_supplied_ticket_hex = NULL;
  * callback. Used by net_connect below when no --ticket, no agent secret and no dev
  * REDGARDEN_TICKET_SECRET is present -- i.e. the normal "a human double-clicked the game" case. */
 static RgAccount g_rg_account;
+static int g_rg_use_sdk = 0;       /* --login-iduna: sign in through the IDUNA SSO SDK first (kanban #631) */
 static int g_rg_force_account = 0; /* --account: use the IDUNA account flow even if REDGARDEN_TICKET_SECRET is set */
 
 static char iduna_host[128] = "127.0.0.1";
@@ -2804,6 +2805,9 @@ int main(int argc, char *argv[]) {
             g_supplied_ticket_hex = argv[++i];
         } else if (strcmp(argv[i], "--account") == 0) {
             g_rg_force_account = 1;
+        } else if (strcmp(argv[i], "--login-iduna") == 0) {
+            g_rg_use_sdk = 1;
+            g_rg_force_account = 1;
         } else if (strcmp(argv[i], "--iduna-url") == 0 && i + 1 < argc) {
             rg_iduna_url = argv[++i];
         } else if (strcmp(argv[i], "--connect-url") == 0 && i + 1 < argc) {
@@ -2814,6 +2818,7 @@ int main(int argc, char *argv[]) {
     }
     rg_account_init(&g_rg_account, rg_iduna_url, rg_connect_url, rg_account_file);
     rg_account_load(&g_rg_account);
+    g_rg_account.use_sdk = g_rg_use_sdk;
 #ifdef _WIN32
     /* Sockets need WSAStartup before any socket() call on Windows -- only
        needed if this run actually uses the network (--connect/--queue),

@@ -94,7 +94,7 @@ shape as DEADWEIGHT's guest accounts and the Hearthstone tracker's browser sign-
    server's existing HMAC verification. No server-protocol change.
 
 Network calls shell out to `curl` (https; this repo has no TLS stack). Flags/env: `--iduna-url`
-(`REDGARDEN_IDUNA_URL`), `--connect-url`, `--account-file`, `--account` (use this flow even when
+(`REDGARDEN_IDUNA_URL`), `--connect-url`, `--account-file`, `--login-iduna` (account flow, signing in through the IDUNA SSO SDK first; `REDGARDEN_SSO_BASE`), `--account` (use this flow even when
 `REDGARDEN_TICKET_SECRET` is set; with the secret set and no `--account` the client keeps the old
 self-minted dev ticket, which is what the packaged `PLAY.bat` does today).
 

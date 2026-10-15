@@ -53,6 +53,8 @@
   #define RG_BAD_SOCK (-1)
 #endif
 
+#include "iduna_login.h" /* IDUNA SSO SDK (IDUNA/sdk/c) -- the --login-iduna path, kanban #631 */
+
 #define RG_TICKET_LEN 36 /* 20-byte payload + 16-byte truncated HMAC, same as ARENA_TICKET_TOTAL_LEN */
 
 typedef struct {
@@ -65,6 +67,8 @@ typedef struct {
     char token[1700];       /* game-scoped player JWT */
     long exp;               /* token expiry (unix seconds), 0 = unknown */
     int  login_timeout_s;   /* how long to wait for the browser callback */
+    int  use_sdk;           /* 1 = sign in straight through the IDUNA SSO SDK (iduna_login.h), then sso-exchange */
+    char sso_base[160];     /* IDUNA origin the SDK opens, default https://iam.okemily.com (env REDGARDEN_SSO_BASE) */
 } RgAccount;
 
 /* ---- small helpers ---- */
@@ -202,6 +206,10 @@ static void rg_account_init(RgAccount *a, const char *base_url, const char *conn
     else snprintf(a->connect_url, sizeof a->connect_url, "%s/redgarden/connect.html", a->base_url);
     snprintf(a->account_path, sizeof a->account_path, "%s", account_path && *account_path ? account_path : "redgarden_account.txt");
     a->login_timeout_s = 180;
+    {
+        const char *sb = getenv("REDGARDEN_SSO_BASE");
+        snprintf(a->sso_base, sizeof a->sso_base, "%s", sb && *sb ? sb : IDUNA_LOGIN_DEFAULT_BASE);
+    }
 }
 
 static void rg_account_load(RgAccount *a) {
@@ -388,6 +396,64 @@ static int rg_browser_login(RgAccount *a) {
     return ok;
 }
 
+/* ---- IDUNA SSO SDK path (kanban #631: dogfood the SDK) ----
+ * Sign in straight through IDUNA's own page via iduna_login.h (loopback + state nonce + Host guard), then trade
+ * the player JWT for a REDGARDEN game token at /api/v1/games/redgarden/sso-exchange -- the same endpoint
+ * connect.html's "Sign in with IDUNA" button uses. 1 = a.token filled. 0 = failed or this IDUNA identity has no
+ * REDGARDEN account yet (the caller then falls back to the connect page, which lets the player pick a name). */
+static void rg_sleep_ms(int ms) {
+#ifdef _WIN32
+    Sleep((DWORD)ms);
+#else
+    struct timespec ts = { ms / 1000, (long)(ms % 1000) * 1000000L };
+    nanosleep(&ts, NULL);
+#endif
+}
+
+static int rg_sdk_login(RgAccount *a, int open_browser) {
+    IdunaLogin L;
+    int r = 0;
+    if (iduna_login_begin_ex(&L, a->sso_base, open_browser) != 0) {
+        fprintf(stderr, "REDGARDEN: IDUNA sign-in could not start (base %s)\n", a->sso_base);
+        return 0;
+    }
+    fprintf(stderr, "REDGARDEN: opening %s\nREDGARDEN: waiting up to %d s for you to sign in with IDUNA in the browser\n",
+            L.login_url, a->login_timeout_s);
+    fflush(stderr);
+    {
+        time_t deadline = time(NULL) + a->login_timeout_s;
+        while (time(NULL) < deadline) {
+            r = iduna_login_poll(&L);
+            if (r != 0) break;
+            rg_sleep_ms(50);
+        }
+    }
+    if (r == 1) {
+        char resp[4096];
+        int st = 0;
+        if (rg_http(a, "POST", "/api/v1/games/redgarden/sso-exchange", L.token, "{}", resp, sizeof resp, &st) == 0 && st == 200) {
+            char pid[48], tok[1700], nm[48];
+            long exp = 0;
+            if (rg_json_str(resp, "player_id", pid, sizeof pid) && rg_safe_chars(pid, "-") &&
+                rg_json_str(resp, "token", tok, sizeof tok) && rg_safe_chars(tok, "._-")) {
+                snprintf(a->player_id, sizeof a->player_id, "%s", pid);
+                snprintf(a->token, sizeof a->token, "%s", tok);
+                a->secret[0] = '\0';
+                if (rg_json_str(resp, "display_name", nm, sizeof nm)) snprintf(a->name, sizeof a->name, "%s", nm);
+                rg_json_long(resp, "expires_at", &exp);
+                a->exp = exp;
+                iduna_login_close(&L);
+                return 1;
+            }
+        }
+        fprintf(stderr, "REDGARDEN: IDUNA identity has no REDGARDEN account yet (exchange HTTP %d)\n", st);
+    } else {
+        fprintf(stderr, "REDGARDEN: IDUNA sign-in %s\n", r == 0 ? "timed out" : "failed");
+    }
+    iduna_login_close(&L);
+    return 0;
+}
+
 /* ---- token + ticket ---- */
 
 /* Make sure a.token is a currently-valid player token. 1 = ok. */
@@ -421,6 +487,11 @@ static int rg_ensure_token(RgAccount *a) {
             fprintf(stderr, "REDGARDEN: IDUNA unreachable (is curl installed? is %s up?)\n", a->base_url);
             return 0; /* offline: do not pop a browser that cannot work either */
         }
+    }
+    if (a->use_sdk && rg_sdk_login(a, 1)) {
+        rg_account_save(a);
+        fprintf(stderr, "REDGARDEN: signed in with IDUNA as %s (%s)\n", a->name, a->player_id);
+        return 1;
     }
     if (rg_browser_login(a)) {
         rg_account_save(a);

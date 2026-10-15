@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-15
+
+- feat(accounts): `--login-iduna` signs in straight through the IDUNA SSO SDK (kanban #631, dogfooding
+  `IDUNA/sdk/c/iduna_login.h`, vendored as `packages/common/iduna_login.h`): loopback listener + state nonce + Host
+  guard, then the player JWT is traded at `/api/v1/games/redgarden/sso-exchange` (same endpoint connect.html's
+  button uses) for the game token. An IDUNA identity with no REDGARDEN account yet falls back to the connect page
+  (name pick). Opt-in; the default flow is unchanged. `REDGARDEN_SSO_BASE` overrides the IDUNA origin
+  (default `https://iam.okemily.com`). `tests/test_rg_account.py` case F: SDK URL is the contract endpoint, wrong
+  nonce and foreign Host rejected, exchange called once with the player JWT, ticket minted, token persisted (all
+  against a stub IDUNA; 0 failures). NOT done: run against live IDUNA with a human browser; the SDL client itself was
+  not built here (syntax-only check of `apps/arena/src/main.c`).
+
 ## 2026-10-10
 
 - feat(accounts): IDUNA player identity for the human client -- name pick, saved progress and
