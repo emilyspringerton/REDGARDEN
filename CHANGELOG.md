@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-24
+
+- feat(camera): PARENA camera mods checked in, not yet wired (BACKLOG SECTION 636, UNIFY-0/4). `packages/simulation/camera_unify_mod.c` + `camera_unify_mod_host.h` generated from `PARENA/stdlib/camera/*.prn` (`scripts/gen_camera_unify.sh`): wheel zoom with first person at full zoom-in, click-to-move decisions, third-person follow options. `tests/test_camera_unify.c` registered in `scripts/test_arena.sh` and `tests/BUILD.bazel` (the Bazel target is unverified -- no bazel on this box).
+
 ## 2026-10-15
 
 - feat(accounts): `--login-iduna` signs in straight through the IDUNA SSO SDK (kanban #631, dogfooding

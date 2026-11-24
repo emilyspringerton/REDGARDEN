@@ -128,6 +128,15 @@ gcc -std=c99 -O2 -Wall -Wextra -I"${ROOT_DIR}/packages" \
   "${ROOT_DIR}/packages/common/mlp_infer.c" \
   -lm
 
+# Unified camera mods (BACKLOG SECTION 636, UNIFY-0/4): WoW-style wheel zoom with first person at full
+# zoom-in, client-side click-to-move decisions, third-person follow options -- all PARENA mods
+# (stdlib/camera/*.prn), round-tripped through the checked-in generated C. Headless; hand-derived numbers.
+gcc -std=c99 -O2 -Wall -Wextra -pedantic -DPARENA_NO_GRAPHICS -I"${ROOT_DIR}/packages/simulation" \
+  -o "${BUILD_DIR}/test_camera_unify" \
+  "${ROOT_DIR}/tests/test_camera_unify.c" \
+  "${ROOT_DIR}/packages/simulation/camera_unify_mod.c" \
+  -lm
+
 # Bloodflower / day-night cycle (2026-08-25): real live round-trip through the compiled PARENA
 # mod (stdlib/redgarden/bloodflower_mod.prn), same headless-testable reasoning as the rest of
 # this file.
@@ -360,6 +369,7 @@ gcc -std=c99 -O2 -Wall -Wextra -I"${ROOT_DIR}/packages" \
 "${BUILD_DIR}/test_gpt2_infer"
 "${BUILD_DIR}/test_arena_training"
 "${BUILD_DIR}/test_mlp_infer"
+"${BUILD_DIR}/test_camera_unify"
 
 # IDUNA account module (packages/common/rg_account.h): real curl + loopback callback against a
 # stub IDUNA. Needs python3 and curl; skipped (not failed) where either is missing.

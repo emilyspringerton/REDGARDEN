@@ -58,6 +58,17 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+# Unified camera mods (BACKLOG SECTION 636): PARENA-generated, pure logic, no host callbacks -- its own
+# library, not folded into :arena_game (nothing here calls back into arena_game.c or vice versa).
+cc_library(
+    name = "camera_unify",
+    srcs = ["camera_unify_mod.c"],
+    hdrs = ["camera_unify_mod_host.h", "parena_runtime.h"],
+    copts = ["-DPARENA_NO_GRAPHICS"],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "arena_replay",
     srcs = ["arena_replay.c"],

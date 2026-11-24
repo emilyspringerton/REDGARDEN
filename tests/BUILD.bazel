@@ -50,6 +50,13 @@ cc_test(
 )
 
 cc_test(
+    name = "test_camera_unify",
+    srcs = ["test_camera_unify.c"],
+    deps = ["//packages/simulation:camera_unify"],
+    copts = COMMON_TEST_COPTS + ["-DPARENA_NO_GRAPHICS"],
+)
+
+cc_test(
     name = "test_mlp_infer",
     srcs = ["test_mlp_infer.c"],
     deps = ["//packages/common:mlp_infer"],

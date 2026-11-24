@@ -37,6 +37,7 @@
 #include "../../../packages/common/http_client.h"
 #include "../../../packages/common/rg_account.h"
 #include "../../../packages/simulation/arena_game.h"
+#include "arena_cam.h"
 #include "../../../packages/simulation/arena_ai_bridge.h"
 #include "../../../packages/simulation/arena_replay.h"
 #include "../../../packages/goldenband/gband.h"
@@ -118,7 +119,7 @@ static void shop_panel_origin(int win_w, int win_h, float *sp_x, float *sp_y_top
  * on exactly the slider it visually appears over. Centered on screen, same real reason the
  * ability-help panel above centers on win_w -- it's a modal-feeling overlay, not anchored HUD. */
 #define SETTINGS_PANEL_W 360.0f
-#define SETTINGS_PANEL_H 150.0f
+#define SETTINGS_PANEL_H 290.0f
 #define SETTINGS_SLIDER_W 260.0f
 #define SETTINGS_SLIDER_H 14.0f
 static void settings_panel_origin(int win_w, int win_h, float *panel_x, float *panel_y) {
@@ -129,8 +130,12 @@ static void settings_slider_track(int win_w, int win_h, float *track_x, float *t
     float panel_x, panel_y;
     settings_panel_origin(win_w, win_h, &panel_x, &panel_y);
     *track_x = panel_x + (SETTINGS_PANEL_W - SETTINGS_SLIDER_W) / 2.0f;
-    *track_y = panel_y + SETTINGS_PANEL_H / 2.0f - SETTINGS_SLIDER_H / 2.0f;
+    *track_y = panel_y + SETTINGS_PANEL_H - 90.0f; /* volume slider sits under the title; camera option rows below it */
 }
+/* The four third-person camera option rows (UNIFY-4): click a row to cycle its value. Row i occupies
+ * [row_y, row_y + SETTINGS_CAM_ROW_H) in the HUD's bottom-up space. */
+#define SETTINGS_CAM_ROW_H 26.0f
+static float settings_cam_row_y(float panel_y, int i) { return panel_y + SETTINGS_PANEL_H - 164.0f - 34.0f * (float)i; }
 static const char *ARENA_ITEM_SLOT_NAMES[ARENA_ITEM_SLOT_COUNT] = {
     "WEAPON", "HEAD", "BODY", "HANDS", "LEGS", "FEET", "RING", "NECK", "BACK", "WAIST", "TRINKET"
 };
@@ -2556,7 +2561,8 @@ static void draw_ability_tile(float x, float y, float size, int cooldown_ms, flo
 }
 
 /* ---------------- camera ---------------- */
-static float cam_yaw = 45.0f, cam_pitch = 40.0f, cam_dist = 16.0f;
+static float cam_yaw = 45.0f, cam_pitch = 40.0f;
+static ArenaCam g_cam; /* zoom arm / first-person flag / follow options; all decisions are PARENA mods, see arena_cam.h */
 /* cam_locked (NORTHSTAR §15.1, founder: "specdd unlockable and lockable camera and fog of
  * war"): the orbit pivot already hard-follows arena_state.heroes[my_owner] every frame
  * unconditionally (focus_x/focus_z below), so "locked" only ever meant freezing the
@@ -2573,11 +2579,12 @@ static void camera_basis(float focus_x, float focus_z,
                           float *right_x, float *right_y, float *right_z,
                           float *up_x, float *up_y, float *up_z) {
     float yaw = cam_yaw * (float)M_PI / 180.0f;
-    float pitch = cam_pitch * (float)M_PI / 180.0f;
-    *eye_x = focus_x + cam_dist * cosf(pitch) * sinf(yaw);
-    *eye_y = cam_dist * sinf(pitch);
-    *eye_z = focus_z + cam_dist * cosf(pitch) * cosf(yaw);
-    float fx = focus_x - *eye_x, fy = -*eye_y, fz = focus_z - *eye_z;
+    float pitch = g_cam.pitch_eff * (float)M_PI / 180.0f;
+    if (g_cam.focus_init) { focus_x = g_cam.focus_x; focus_z = g_cam.focus_z; } /* the smoothed focus the view uses */
+    *eye_x = focus_x + g_cam.dist * cosf(pitch) * sinf(yaw);
+    *eye_y = g_cam.focus_y + g_cam.dist * sinf(pitch);
+    *eye_z = focus_z + g_cam.dist * cosf(pitch) * cosf(yaw);
+    float fx = focus_x - *eye_x, fy = g_cam.focus_y - *eye_y, fz = focus_z - *eye_z;
     float flen = sqrtf(fx * fx + fy * fy + fz * fz);
     *fwd_x = fx / flen; *fwd_y = fy / flen; *fwd_z = fz / flen;
     float upx = 0, upy = 1, upz = 0;
@@ -2934,6 +2941,7 @@ int main(int argc, char *argv[]) {
     if (!observing && !net_mode) arena_log_open();
 
     int dragging_cam = 0;
+    arena_cam_init(&g_cam);
     int last_mx = 0, last_my = 0;
     int running = 1;
     int win_logged = 0;
@@ -2969,8 +2977,23 @@ int main(int argc, char *argv[]) {
             shop_was_in_range = shop_in_range;
         }
 
+        /* First-person mouselook: cursor captured (relative mouse mode) unless a UI surface needs it (settings
+           pane, shop). While captured, button events act at the crosshair (window centre). */
+        int fp_mouselook = g_cam.fp && !show_settings_pane && !shop_open;
+        int cam_manual_input = 0;
+        if ((SDL_GetRelativeMouseMode() == SDL_TRUE) != (fp_mouselook != 0)) {
+            SDL_SetRelativeMouseMode(fp_mouselook ? SDL_TRUE : SDL_FALSE);
+            dragging_cam = 0;
+        }
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
+            if (fp_mouselook && (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP)) {
+                e.button.x = win_w / 2; e.button.y = win_h / 2;
+            }
+            /* first person: W/A/S/D are movement, so the W ability toggle and the S/D stop/hold orders are not
+               reachable there (zoom out to use them) -- flagged assumption, see CHANGELOG */
+            if (g_cam.fp && e.type == SDL_KEYDOWN &&
+                (e.key.keysym.sym == SDLK_w || e.key.keysym.sym == SDLK_s || e.key.keysym.sym == SDLK_d)) continue;
             if (e.type == SDL_QUIT) running = 0;
             if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_RESIZED) {
                 win_w = e.window.data1; win_h = e.window.data2;
@@ -2981,23 +3004,23 @@ int main(int argc, char *argv[]) {
             if (e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_RIGHT) {
                 dragging_cam = 0;
             }
-            if (e.type == SDL_MOUSEMOTION && dragging_cam) {
+            if (e.type == SDL_MOUSEMOTION && fp_mouselook) {
+                /* first person: mouselook is always on, cam_locked does not apply */
+                arena_cam_look(&g_cam, &cam_yaw, &cam_pitch, e.motion.xrel, e.motion.yrel, 1);
+                cam_manual_input = 1;
+            } else if (e.type == SDL_MOUSEMOTION && dragging_cam) {
                 int dx = e.motion.x - last_mx, dy = e.motion.y - last_my;
                 last_mx = e.motion.x; last_my = e.motion.y;
                 /* S170-193-adjacent, NORTHSTAR §15.1: locked mode makes right-drag rotation a
                    no-op (mouse deltas still consumed above so drag tracking doesn't jump the
                    instant unlock happens) -- zoom below stays ungated regardless of lock state. */
-                if (!cam_locked) {
-                    cam_yaw += dx * 0.3f;
-                    cam_pitch += dy * 0.3f;
-                    if (cam_pitch < 10.0f) cam_pitch = 10.0f;
-                    if (cam_pitch > 80.0f) cam_pitch = 80.0f;
+                if (!cam_locked || g_cam.fp) {
+                    arena_cam_look(&g_cam, &cam_yaw, &cam_pitch, dx, dy, 0);
+                    cam_manual_input = 1;
                 }
             }
             if (e.type == SDL_MOUSEWHEEL) {
-                cam_dist -= e.wheel.y * 1.0f;
-                if (cam_dist < 4.0f) cam_dist = 4.0f;
-                if (cam_dist > 30.0f) cam_dist = 30.0f;
+                arena_cam_wheel(&g_cam, e.wheel.y); /* scroll up = in; all the way in = first person (WoW-style) */
             }
             if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_c) {
                 cam_locked = !cam_locked; /* NORTHSTAR §15.1, same "works in any mode" precedent as F11/H/B below */
@@ -3169,6 +3192,13 @@ int main(int argc, char *argv[]) {
                 if (bx >= panel_x && bx <= panel_x + SETTINGS_PANEL_W &&
                     by >= panel_y && by <= panel_y + SETTINGS_PANEL_H) {
                     settings_click_consumed = 1;
+                }
+                if (settings_click_consumed) {
+                    for (int row = 0; row < ARENA_CAM_OPT_COUNT; row++) {
+                        float ry = settings_cam_row_y(panel_y, row);
+                        if (bx >= panel_x + 16.0f && bx <= panel_x + SETTINGS_PANEL_W - 16.0f &&
+                            by >= ry && by < ry + SETTINGS_CAM_ROW_H) arena_cam_opt_cycle(&g_cam, row);
+                    }
                 }
                 float track_x, track_y;
                 settings_slider_track(win_w, win_h, &track_x, &track_y);
@@ -3769,8 +3799,40 @@ int main(int argc, char *argv[]) {
         }
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        float focus_x = arena_state.heroes[my_owner].x, focus_z = arena_state.heroes[my_owner].z;
-        Mat4 view = mat4_orbit_view(focus_x, 0, focus_z, cam_yaw, cam_pitch, cam_dist);
+        {
+            ArenaCamIn cin;
+            cin.hero_x = arena_state.heroes[my_owner].x; cin.hero_z = arena_state.heroes[my_owner].z;
+            cin.hero_y = 0.0f; /* flat arena: no heightfield, so the Terrain option has nothing to adapt to yet (slope 0) */
+            cin.facing_rad = hero_facing_rad[my_owner];
+            cin.slope_permille = 0;
+            cin.manual_input = cam_manual_input;
+            cin.cam_locked = cam_locked;
+            arena_cam_step(&g_cam, (int)dt, &cin, &cam_yaw, &cam_pitch);
+        }
+        /* First-person WASD: REDGARDEN has no direct-movement input (click-to-move only), so WASD issues a move
+           target a fixed lookahead ahead of the hero (assumption, see CHANGELOG). Throttled to 10 Hz on the wire;
+           releasing every key stops the hero. */
+        if (g_cam.fp && !observing && !show_settings_pane && arena_state.winner == 0 &&
+            arena_state.heroes[my_owner].alive) {
+            static uint32_t fp_move_last_ms = 0;
+            static int fp_was_moving = 0;
+            const Uint8 *fks = SDL_GetKeyboardState(NULL);
+            int dxp, dzp;
+            float tx, tz;
+            arena_cam_wasd_dir(cam_yaw, fks[SDL_SCANCODE_W], fks[SDL_SCANCODE_A], fks[SDL_SCANCODE_S], fks[SDL_SCANCODE_D], &dxp, &dzp);
+            if (arena_cam_ahead_target(arena_state.heroes[my_owner].x, arena_state.heroes[my_owner].z, dxp, dzp, &tx, &tz)) {
+                if (!fp_was_moving || now - fp_move_last_ms >= 100) {
+                    if (net_mode) net_send_move(my_owner, tx, tz); else arena_set_move_target(my_owner, tx, tz);
+                    fp_move_last_ms = now;
+                }
+                fp_was_moving = 1;
+            } else if (fp_was_moving) {
+                if (net_mode) net_send_stop(my_owner); else arena_stop_unit(my_owner);
+                fp_was_moving = 0;
+            }
+        }
+        float focus_x = g_cam.focus_x, focus_z = g_cam.focus_z;
+        Mat4 view = mat4_orbit_view(g_cam.focus_x, g_cam.focus_y, g_cam.focus_z, cam_yaw, g_cam.pitch_eff, g_cam.dist);
         Mat4 proj = mat4_perspective(60.0f, (float)win_w / (float)win_h, 0.1f, 100.0f);
         Mat4 vp = mat4_multiply(&proj, &view);
         g_last_vp = vp; /* 2026-07-30: see this variable's own doc comment -- next frame's drag-select box-test reads this */
@@ -3925,6 +3987,7 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < ARENA_MAX_HEROES; i++) {
             ArenaHero *h = &arena_state.heroes[i];
             if (!h->alive) continue;
+            if (i == my_owner && g_cam.hide_self) continue; /* first person (and the last stretch of zoom-in): no body */
             /* intangible_ms (Ghost's Not a Ghost, Frog's R vanish, Bacon Puck's Q, etc. --
                any kit that grants the shared can't-be-hit status) reads as the skinmodel
                going see-through for its duration, same "can't touch this" read a real MOBA
@@ -4272,6 +4335,7 @@ int main(int argc, char *argv[]) {
         if (g_ground_target_pending_slot != 0 && my_owner >= 0 && my_owner < ARENA_MAX_HEROES) {
             int rmx, rmy;
             SDL_GetMouseState(&rmx, &rmy);
+            if (fp_mouselook) { rmx = win_w / 2; rmy = win_h / 2; }
             float rgx, rgz;
             float rfocus_x = arena_state.heroes[my_owner].x, rfocus_z = arena_state.heroes[my_owner].z;
             if (screen_to_ground(rmx, rmy, win_w, win_h, 60.0f, rfocus_x, rfocus_z, &rgx, &rgz)) {
@@ -4560,6 +4624,7 @@ int main(int argc, char *argv[]) {
            HUD's own glOrtho), same flip the OK-button hit test already uses. */
         int raw_mx, raw_my;
         SDL_GetMouseState(&raw_mx, &raw_my);
+        if (fp_mouselook) { raw_mx = win_w / 2; raw_my = win_h / 2; } /* crosshair hover */
         float mouse_hx = (float)raw_mx, mouse_hy = (float)(win_h - raw_my);
         int hovered_i = -1;
         float hovered_sx = 0, hovered_sy = 0;
@@ -4576,6 +4641,7 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < ARENA_HEROES_ARRAY_SIZE; i++) {
             ArenaHero *h = &arena_state.heroes[i];
             if (!h->alive) continue;
+            if (i == my_owner && g_cam.hide_self) continue; /* own floating bar would sit on the camera */
             float sx, sy;
             if (!world_to_screen(&vp, h->x, 1.6f, h->z, win_w, win_h, &sx, &sy)) continue;
             if (sx < -40 || sx > win_w + 40 || sy < -20 || sy > win_h + 20) continue;
@@ -5159,7 +5225,21 @@ int main(int argc, char *argv[]) {
             draw_string("ESC TO CLOSE", panel_x + SETTINGS_PANEL_W - 130.0f, panel_y + SETTINGS_PANEL_H - 26.0f, 8);
 
             glColor3f(0.85f, 0.9f, 0.7f);
-            draw_string("MASTER VOLUME", panel_x + 16.0f, panel_y + SETTINGS_PANEL_H / 2.0f + 26.0f, 9);
+            draw_string("MASTER VOLUME", panel_x + 16.0f, panel_y + SETTINGS_PANEL_H - 64.0f, 9);
+            glColor3f(0.85f, 0.9f, 0.7f);
+            draw_string("THIRD-PERSON CAMERA (CLICK TO CHANGE)", panel_x + 16.0f, panel_y + SETTINGS_PANEL_H - 132.0f, 8);
+            for (int row = 0; row < ARENA_CAM_OPT_COUNT; row++) {
+                float ry = settings_cam_row_y(panel_y, row);
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                glColor4f(0.12f, 0.17f, 0.2f, 0.95f);
+                glRectf(panel_x + 16.0f, ry, panel_x + SETTINGS_PANEL_W - 16.0f, ry + SETTINGS_CAM_ROW_H);
+                glDisable(GL_BLEND);
+                glColor3f(0.7f, 0.75f, 0.8f);
+                draw_string(arena_cam_opt_name(row), panel_x + 24.0f, ry + 8.0f, 8);
+                glColor3f(0.4f, 0.85f, 0.95f);
+                draw_string(arena_cam_opt_label(row, g_cam.opt[row]), panel_x + 170.0f, ry + 8.0f, 8);
+            }
 
             /* Slider track + filled portion + handle -- same immediate-mode-quad idiom every
                other bar/pie affordance in this HUD already uses (ability cooldown pies,
@@ -5444,6 +5524,17 @@ int main(int argc, char *argv[]) {
             draw_string(apmbuf, win_w - 140.0f, win_h - 30.0f, 14);
         }
 
+        if (g_cam.fp) {
+            /* first-person crosshair at the window centre (HUD space is bottom-up pixels, centre is symmetric) */
+            float cx = win_w / 2.0f, cy = win_h / 2.0f;
+            glColor3f(0.95f, 0.98f, 1.0f);
+            glRectf(cx - 10.0f, cy - 1.0f, cx - 3.0f, cy + 1.0f);
+            glRectf(cx + 3.0f, cy - 1.0f, cx + 10.0f, cy + 1.0f);
+            glRectf(cx - 1.0f, cy - 10.0f, cx + 1.0f, cy - 3.0f);
+            glRectf(cx - 1.0f, cy + 3.0f, cx + 1.0f, cy + 10.0f);
+            glColor3f(0.5f, 0.85f, 1.0f);
+            draw_string("FIRST PERSON  WASD MOVE  SCROLL OUT", win_w - 330.0f, win_h - 70.0f, 10);
+        }
         if (cam_locked) {
             /* NORTHSTAR §15.1: the only on-screen sign the C toggle did anything -- nothing
                else in the frame changes shape when locked (the pivot already always follows

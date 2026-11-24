@@ -15,6 +15,7 @@ cc_binary(
         "//packages/goldenband",
         "//packages/simulation:arena_ai_bridge",
         "//packages/simulation:arena_game",
+        "//packages/simulation:camera_unify",
         "//packages/simulation:arena_replay",
     ],
     linkopts = ["-lSDL2", "-lGL", "-lm"],
