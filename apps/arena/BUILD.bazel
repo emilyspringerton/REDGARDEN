@@ -9,12 +9,13 @@ load("@rules_cc//cc:defs.bzl", "cc_binary")
 # a real #include in the one file that needs it, done.
 cc_binary(
     name = "red_garden_arena",
-    srcs = ["src/main.c"],
+    srcs = ["src/main.c", "src/arena_cam.h"],
     deps = [
         "//packages/common:common_headers",
         "//packages/goldenband",
         "//packages/simulation:arena_ai_bridge",
         "//packages/simulation:arena_game",
+        "//packages/simulation:camera_unify",
         "//packages/simulation:arena_replay",
     ],
     linkopts = ["-lSDL2", "-lGL", "-lm"],

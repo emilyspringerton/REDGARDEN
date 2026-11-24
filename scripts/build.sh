@@ -54,6 +54,7 @@ gcc "${COMMON_FLAGS[@]}" \
   "${ROOT_DIR}/packages/simulation/duck_smoke_bomb_mod.c" \
   "${ROOT_DIR}/packages/simulation/abraham_fireball_mod.c" \
   "${ROOT_DIR}/packages/simulation/bacon_puck_intangible_speed_mod.c" \
+  "${ROOT_DIR}/packages/simulation/camera_unify_mod.c" \
   "${ROOT_DIR}/packages/common/mlp_infer.c" \
   -lm
 
@@ -98,6 +99,7 @@ gcc -std=c99 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -I"${ROOT_DIR}/packages" \
   "${ROOT_DIR}/packages/simulation/duck_smoke_bomb_mod.c" \
   "${ROOT_DIR}/packages/simulation/abraham_fireball_mod.c" \
   "${ROOT_DIR}/packages/simulation/bacon_puck_intangible_speed_mod.c" \
+  "${ROOT_DIR}/packages/simulation/camera_unify_mod.c" \
   "${ROOT_DIR}/packages/common/mlp_infer.c" \
   "${ROOT_DIR}/packages/goldenband/gband.c" \
   "${ROOT_DIR}/packages/goldenband/gband_rig.c" \

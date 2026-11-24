@@ -103,6 +103,7 @@ jobs:
             packages/simulation/duck_smoke_bomb_mod.c \
             packages/simulation/abraham_fireball_mod.c \
             packages/simulation/bacon_puck_intangible_speed_mod.c \
+            packages/simulation/camera_unify_mod.c \
             packages/common/mlp_infer.c \
             packages/goldenband/gband.c \
             packages/goldenband/gband_rig.c \
