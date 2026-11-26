@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-26
+
+- feat(camera): the arena camera is wired to the PARENA camera mods (BACKLOG SECTION 636, UNIFY-1/UNIFY-4) -- this landed in the 11-24 `wip` commit, whose CHANGELOG line still said "not yet wired". `apps/arena/src/arena_cam.h` (thin glue) + `main.c`: wheel zoom with first person at full zoom-in (mouselook, crosshair, body hidden, WASD issues move targets ahead of the hero, 10 Hz on the wire), the four third-person options in the settings pane. `tests/test_arena_cam.c` 61 checks + `test_camera_unify.c` 1035 checks via `scripts/test_arena.sh` (all pass); `scripts/build_arena.sh` builds; the client runs 25 s under Xvfb without a crash. Not yet played by a human; README controls table updated.
+
 ## 2026-11-24
 
 - feat(camera): PARENA camera mods checked in, not yet wired (BACKLOG SECTION 636, UNIFY-0/4). `packages/simulation/camera_unify_mod.c` + `camera_unify_mod_host.h` generated from `PARENA/stdlib/camera/*.prn` (`scripts/gen_camera_unify.sh`): wheel zoom with first person at full zoom-in, click-to-move decisions, third-person follow options. `tests/test_camera_unify.c` registered in `scripts/test_arena.sh` and `tests/BUILD.bazel` (the Bazel target is unverified -- no bazel on this box).

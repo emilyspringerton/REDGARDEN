@@ -18,7 +18,8 @@ comments in `apps/arena/src/main.c` and left implicit across every hero entry in
 | **Held TAB** | Scoreboard: every hero's kills/deaths/Flow/XP, plus a team-aggregate row, both teams side by side. |
 | **H** | Toggle an ability-description overlay for your own hero's Q/W/E. |
 | **Right click + drag** | Rotate the camera around your hero. No-op while camera lock (`C`) is on. |
-| **Mouse wheel** | Zoom the camera in/out. Always works, even while camera lock is on. |
+| **Mouse wheel** | Zoom the camera in/out (WoW-style). Scroll all the way in and you are in **first person**: mouselook, a crosshair, your hero's body hidden, W/A/S/D move (W ability toggle and S/D stop/hold are only reachable zoomed out). Scroll out to return to the MOBA view. Always works, even while camera lock is on. Decisions are the shared PARENA camera mods (`packages/simulation/camera_unify_mod.c`, same file SHANKPIT uses). |
+| **Settings → Third-person camera** | Four options, click a row to cycle: follow style (Free / Behind when moving / Always behind), recenter speed, terrain (Off / Slope — the arena is flat, so Slope has nothing to follow yet), smoothing. Default Free / normal / Off / Off. |
 | **C** | Toggle camera lock (NORTHSTAR §15.1). The camera already always follows your hero's position — locking freezes the rotation angle too, so you can't look away from them. Shows "CAM LOCKED" on screen while on. Starts unlocked every match. |
 | **F11** | Toggle the APM (actions-per-minute) overlay. Works in any mode. |
 | **R** | Restart the match. Local practice mode only (against the built-in bot) — disabled entirely once you're in a real networked match, since a real match has other players in it. |
