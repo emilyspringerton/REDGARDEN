@@ -1,0 +1,53 @@
+name: Deploy REDGARDEN to the game box
+
+# REDGARDEN auto-deploy on the Vultr infra (GCP gone 2026-11-26): the 7 redgarden-* units on play.okemily.com.
+# Every push to main builds on GitHub's runner and streams a release tarball over SSH to the box. The deploy key
+# (secret DEPLOY_SSH_KEY) is bound to a forced command, so all it can do is hand the receiver this one game's
+# files; the receiver installs them, restarts the units, health-checks and rolls back on failure
+# (WOTAN/ops/deploy/game-receive.sh; one-time wiring: WOTAN/ops/deploy/setup.sh and README.md).
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**']
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DEPLOY_HOST: ${{ vars.DEPLOY_HOST || 'play.okemily.com' }}
+  # Pinned host key; if the box is rebuilt update it here or set the DEPLOY_KNOWN_HOSTS repo variable.
+  DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS || 'play.okemily.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGVVKN0aWONQE1pLdY1ij8GWMqS17Q2lZu9GdzvNE7y4' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04   # the box is Ubuntu 24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the server binaries (static)
+        run: scripts/build-linux-servers.sh "$RUNNER_TEMP/rel/bin"
+
+      - name: Pack release
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD > "$RUNNER_TEMP/rel/REVISION"
+          tar -czf "$RUNNER_TEMP/release.tgz" -C "$RUNNER_TEMP/rel" .
+          ls -l "$RUNNER_TEMP/release.tgz"
+
+      - name: Ship to the game box
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DEPLOY_KEY" ]; then echo "::error::DEPLOY_SSH_KEY secret is not set -- see WOTAN/ops/deploy/README.md"; exit 1; fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -T -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 \
+              "root@$DEPLOY_HOST" < "$RUNNER_TEMP/release.tgz"

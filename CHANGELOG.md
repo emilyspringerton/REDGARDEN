@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-28
+
+- ci(deploy): **auto-deploy to the Vultr game box** (GCP is gone, so the old Cloud Build deploy.yml was dead). Every push builds on the runner and streams a release tarball over SSH to play.okemily.com, where a forced-command receiver (WOTAN/ops/deploy/game-receive.sh) installs it, restarts the units, health-checks and rolls back on failure. Needs the DEPLOY_SSH_KEY repo secret (set 2026-11-28). Builds with scripts/build-linux-servers.sh (static matchmaker, arena server, arena bot).
+
 ## 2026-11-26
 
 - feat(camera): the arena camera is wired to the PARENA camera mods (BACKLOG SECTION 636, UNIFY-1/UNIFY-4) -- this landed in the 11-24 `wip` commit, whose CHANGELOG line still said "not yet wired". `apps/arena/src/arena_cam.h` (thin glue) + `main.c`: wheel zoom with first person at full zoom-in (mouselook, crosshair, body hidden, WASD issues move targets ahead of the hero, 10 Hz on the wire), the four third-person options in the settings pane. `tests/test_arena_cam.c` 61 checks + `test_camera_unify.c` 1035 checks via `scripts/test_arena.sh` (all pass); `scripts/build_arena.sh` builds; the client runs 25 s under Xvfb without a crash. Not yet played by a human; README controls table updated.
